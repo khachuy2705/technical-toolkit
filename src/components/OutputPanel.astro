@@ -1,0 +1,46 @@
+---
+import Icon from "./Icon.astro";
+import { ICONS } from "../data/icons";
+
+interface Props {
+  /** Placeholder shown before the first generation. */
+  placeholder: string;
+  generateLabel?: string;
+}
+
+const { placeholder, generateLabel = "Generate" } = Astro.props;
+---
+
+<section class="output" aria-labelledby="output-heading">
+  <h2 id="output-heading" class="visually-hidden">Generated result</h2>
+
+  <output class="output__value" id="result" data-empty="true">{placeholder}</output>
+
+  <p class="output__error" id="result-error" role="alert" hidden></p>
+
+  <div class="output__actions">
+    <button type="button" class="btn btn--primary" id="regenerate">
+      <Icon paths={ICONS.refresh} size={16} strokeWidth={2} />
+      <span data-label>{generateLabel}</span>
+    </button>
+    <button type="button" class="btn" id="copy">
+      <Icon paths={ICONS.copy} size={16} strokeWidth={1.8} />
+      <span data-label>Copy</span>
+    </button>
+  </div>
+
+  <div class="strength" id="strength" data-level="0">
+    <div class="strength__bar" aria-hidden="true">
+      <span class="strength__seg"></span>
+      <span class="strength__seg"></span>
+      <span class="strength__seg"></span>
+      <span class="strength__seg"></span>
+      <span class="strength__seg"></span>
+    </div>
+    <div class="strength__meta">
+      <span class="strength__label" data-strength-label>Very weak</span>
+      <span><b data-strength-bits>0</b> bits of entropy</span>
+      <span>Offline brute force: <b data-strength-time>instantly</b></span>
+    </div>
+  </div>
+</section>

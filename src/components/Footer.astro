@@ -1,0 +1,15 @@
+---
+import { SITE } from "../data/site";
+
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <div class="container site-footer__inner">
+    <span>&copy; {year} {SITE.name}</span>
+    <span>Everything runs in your browser. No data leaves this page.</span>
+    <span class="site-footer__spacer"></span>
+    <a href="/about/">About</a>
+    <a href="/privacy/">Privacy</a>
+  </div>
+</footer>

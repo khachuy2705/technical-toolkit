@@ -1,0 +1,16 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import ToolCard from "../components/ToolCard.astro";
+import { LIVE_TOOLS } from "../data/tools";
+---
+
+<BaseLayout title="Page not found" description="That page does not exist.">
+  <div class="hero">
+    <h1>404</h1>
+    <p>That page does not exist. Here is everything that does:</p>
+  </div>
+
+  <ul class="tool-grid">
+    {LIVE_TOOLS.map((tool) => <ToolCard tool={tool} />)}
+  </ul>
+</BaseLayout>

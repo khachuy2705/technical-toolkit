@@ -1,0 +1,34 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import ToolCard from "../components/ToolCard.astro";
+import { LIVE_TOOLS, PLANNED_TOOLS } from "../data/tools";
+import { SITE } from "../data/site";
+---
+
+<BaseLayout title={`${SITE.name} — ${SITE.tagline}`} description={SITE.description} suffix={false}>
+  <section class="hero">
+    <h1>Small tools that stay on your machine.</h1>
+    <p>
+      {SITE.description} No accounts, no tracking, no build-up of things you typed into someone
+      else&rsquo;s server.
+    </p>
+  </section>
+
+  <h2 class="section-label">Available now</h2>
+  <ul class="tool-grid">
+    {LIVE_TOOLS.map((tool) => <ToolCard tool={tool} />)}
+  </ul>
+
+  {
+    PLANNED_TOOLS.length > 0 && (
+      <>
+        <h2 class="section-label">On the way</h2>
+        <ul class="tool-grid">
+          {PLANNED_TOOLS.map((tool) => (
+            <ToolCard tool={tool} />
+          ))}
+        </ul>
+      </>
+    )
+  }
+</BaseLayout>

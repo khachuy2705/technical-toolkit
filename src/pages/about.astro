@@ -1,0 +1,59 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../data/site";
+---
+
+<BaseLayout
+  title="About"
+  description={`How ${SITE.name} is built and why everything runs in your browser.`}
+>
+  <div class="tool-head">
+    <h1>About</h1>
+    <p>{SITE.tagline}</p>
+  </div>
+
+  <section class="card prose">
+    <h2>What this is</h2>
+    <p>
+      A small, growing set of tools for the jobs that come up mid-task — generate a password, build
+      a passphrase, hash a file — without opening a service that wants an account first.
+    </p>
+
+    <h2>How it works</h2>
+    <p>
+      The whole site is static HTML, CSS and JavaScript, built with Astro and served from a CDN.
+      There is no backend and no database, so there is nothing to breach and nothing to leak. Every
+      tool does its work in your browser after the page has loaded; you can put the tab in aeroplane
+      mode and it keeps working.
+    </p>
+
+    <h2>Randomness</h2>
+    <p>
+      Anything random comes from <code>crypto.getRandomValues()</code>, the browser&rsquo;s
+      cryptographically secure generator, with rejection sampling so values are drawn uniformly.
+      <code>Math.random()</code> is never used: its state is recoverable from a few outputs, which
+      would make anything derived from it predictable.
+    </p>
+
+    <h2>Wordlists</h2>
+    <p>
+      The passphrase generator uses the EFF diceware wordlists — 7,776 words for the large list and
+      1,296 for the short one — released by the Electronic Frontier Foundation into the public
+      domain. They are bundled with the page rather than fetched at runtime.
+    </p>
+
+    <h2>What is stored</h2>
+    <p>
+      Your chosen theme and the option settings on each tool are kept in <code>localStorage</code>,
+      in your browser, so the page comes back the way you left it. Nothing you generate is ever
+      stored, anywhere — not in <code>localStorage</code>, not in memory beyond the current page
+      view, and not on any server.
+    </p>
+
+    <h2>Verifying that</h2>
+    <p>
+      Open DevTools, switch to the Network tab and use any tool on this site. You will see the
+      requests that loaded the page, and nothing after them.
+    </p>
+  </section>
+</BaseLayout>

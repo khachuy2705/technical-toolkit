@@ -1,0 +1,38 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import { SITE } from "../data/site";
+---
+
+<BaseLayout title="Privacy" description={`What ${SITE.name} collects: nothing.`}>
+  <div class="tool-head">
+    <h1>Privacy</h1>
+    <p>The short version: nothing you type or generate here leaves your browser.</p>
+  </div>
+
+  <section class="card prose">
+    <h2>No collection</h2>
+    <p>
+      There is no analytics script, no tag manager, no advertising pixel, no error-reporting SDK and
+      no font or asset loaded from a third party. The site makes no network request after the page
+      and its assets have loaded.
+    </p>
+
+    <h2>No accounts</h2>
+    <p>There is nothing to sign up for, so there is no personal data to hold.</p>
+
+    <h2>Local storage</h2>
+    <p>
+      Two things are saved in your browser and never transmitted: your theme choice, and the option
+      settings for each tool so they persist between visits. Clearing site data removes both.
+      Generated passwords and passphrases are never written to storage.
+    </p>
+
+    <h2>Hosting</h2>
+    <p>
+      The site is served as static files by Vercel. Like any host, Vercel processes the request
+      metadata needed to deliver a page — IP address, user agent, requested path. That is outside
+      this site&rsquo;s control and is not linked to anything you do inside a tool, because nothing
+      you do inside a tool is sent.
+    </p>
+  </section>
+</BaseLayout>

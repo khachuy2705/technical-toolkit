@@ -1,0 +1,73 @@
+---
+import BaseLayout from "./BaseLayout.astro";
+import ToolCard from "../components/ToolCard.astro";
+import { LIVE_TOOLS, toolBySlug } from "../data/tools";
+import { SITE } from "../data/site";
+
+interface Props {
+  slug: string;
+}
+
+const { slug } = Astro.props;
+const tool = toolBySlug(slug);
+const others = LIVE_TOOLS.filter((t) => t.slug !== slug);
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  name: tool.name,
+  description: tool.description,
+  applicationCategory: "SecurityApplication",
+  operatingSystem: "Any",
+  url: new URL(`/tools/${tool.slug}/`, Astro.site ?? SITE.url).href,
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
+---
+
+<BaseLayout title={tool.name} description={tool.description} keywords={tool.keywords}>
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="/">Tools</a> <span aria-hidden="true">/</span> {tool.name}
+  </nav>
+
+  <div class="tool-head">
+    <h1>{tool.name}</h1>
+    <p>{tool.description}</p>
+    <span class="privacy-note">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <rect width="18" height="11" x="3" y="11" rx="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+      Generated locally with your browser&rsquo;s crypto API. Nothing is sent anywhere.
+    </span>
+  </div>
+
+  <div class="stack">
+    <slot />
+  </div>
+
+  {
+    others.length > 0 && (
+      <section style="margin-top:3rem">
+        <h2 class="section-label">More tools</h2>
+        <ul class="tool-grid">
+          {others.map((other) => (
+            <ToolCard tool={other} />
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <script type="application/ld+json" is:inline set:html={JSON.stringify(jsonLd)} />
+</BaseLayout>

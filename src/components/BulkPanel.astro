@@ -1,0 +1,41 @@
+---
+import Icon from "./Icon.astro";
+import { ICONS } from "../data/icons";
+
+interface Props {
+  /** Basename for the downloaded .txt file. */
+  filename: string;
+  max?: number;
+}
+
+const { filename, max = 100 } = Astro.props;
+---
+
+<section class="card" data-filename={filename}>
+  <div class="bulk__head">
+    <h2 class="card__title">Generate in bulk</h2>
+
+    <label class="bulk__count">
+      Count
+      <input type="number" id="bulk-count" min="1" max={max} value="10" />
+    </label>
+
+    <button type="button" class="btn" id="bulk-generate">
+      <Icon paths={ICONS.refresh} size={15} strokeWidth={2} />
+      <span data-label>Generate</span>
+    </button>
+    <button type="button" class="btn" id="bulk-copy">
+      <Icon paths={ICONS.copy} size={15} strokeWidth={1.8} />
+      <span data-label>Copy all</span>
+    </button>
+    <button type="button" class="btn" id="bulk-download">
+      <Icon paths={ICONS.download} size={15} strokeWidth={1.8} />
+      <span data-label>.txt</span>
+    </button>
+  </div>
+
+  <ul class="bulk__list" id="bulk-list"></ul>
+  <p class="bulk__empty" id="bulk-empty">
+    Nothing generated yet. Pick a count and press Generate.
+  </p>
+</section>

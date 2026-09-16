@@ -1,0 +1,264 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import OutputPanel from "../../components/OutputPanel.astro";
+import BulkPanel from "../../components/BulkPanel.astro";
+import {
+  SEPARATORS,
+  WORDLISTS,
+  WORD_COUNT_DEFAULT,
+  WORD_COUNT_MAX,
+  WORD_COUNT_MIN,
+} from "../../lib/passphrase";
+
+const CAPITALIZATIONS = [
+  { id: "lowercase", label: "lowercase" },
+  { id: "title", label: "Title Case" },
+  { id: "uppercase", label: "UPPERCASE" },
+  { id: "random-word", label: "ONE random word uppercase" },
+] as const;
+---
+
+<ToolLayout slug="passphrase-generator">
+  <OutputPanel placeholder="Loading wordlist…" generateLabel="Regenerate" />
+
+  <section class="card">
+    <h2 class="card__title">Options</h2>
+
+    <div class="controls">
+      <div class="field">
+        <label class="field__label" for="word-count">
+          Words
+          <span class="field__value" id="word-count-value">{WORD_COUNT_DEFAULT}</span>
+        </label>
+        <input
+          type="range"
+          id="word-count"
+          min={WORD_COUNT_MIN}
+          max={WORD_COUNT_MAX}
+          value={WORD_COUNT_DEFAULT}
+          step="1"
+        />
+        <p class="field__hint" id="wordlist-hint"></p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="wordlist">Wordlist</label>
+        <select id="wordlist">
+          {
+            WORDLISTS.map((list) => (
+              <option value={list.id}>
+                {list.label} — {list.size.toLocaleString("en-US")} words
+              </option>
+            ))
+          }
+        </select>
+        <p class="field__hint">
+          Both lists are published by the EFF and chosen so no word is a prefix of another.
+        </p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="separator">Separator</label>
+        <select id="separator">
+          {SEPARATORS.map((sep) => <option value={sep.id}>{sep.label}</option>)}
+        </select>
+
+        <label class="field__label" for="capitalization" style="margin-top:0.5rem">Capitalisation</label>
+        <select id="capitalization">
+          {CAPITALIZATIONS.map((cap) => <option value={cap.id}>{cap.label}</option>)}
+        </select>
+      </div>
+
+      <fieldset class="field" style="border:0;margin:0;padding:0;min-inline-size:0">
+        <legend class="field__label" style="padding:0">Extras</legend>
+        <div class="field__group">
+          <label class="check">
+            <input type="checkbox" id="include-number" />
+            <span class="check__text">
+              Append a digit
+              <span class="check__sample">to one random word</span>
+            </span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="include-symbol" />
+            <span class="check__text">
+              Append a symbol
+              <span class="check__sample">to one random word</span>
+            </span>
+          </label>
+        </div>
+        <p class="field__hint">
+          These satisfy &ldquo;must contain a number and a symbol&rdquo; policies. They add barely
+          any entropy — reach for one more word instead when you have the choice.
+        </p>
+      </fieldset>
+    </div>
+  </section>
+
+  <BulkPanel filename="passphrases.txt" max={50} />
+
+  <section class="card prose">
+    <h2>Why a passphrase</h2>
+    <p>
+      Six words from the EFF large list is about 77 bits — stronger than a 12-character random
+      password, and something you can hold in your head after a couple of readings. The strength
+      comes from the number of words, not from how obscure they look.
+    </p>
+
+    <h2>How the entropy is counted</h2>
+    <p>
+      Each word contributes <code>log2(7776) = 12.92</code> bits from the large list, or
+      <code>log2(1296) = 10.34</code> from the short one. Random separators add a little per gap;
+      a single randomly uppercased word adds <code>log2(words)</code>. The appended digit and symbol
+      are counted by value only — their random position is real entropy that we deliberately do not
+      claim.
+    </p>
+
+    <h2>Using it well</h2>
+    <ul>
+      <li>Do not swap a word you dislike for one you thought of. That is where the randomness leaks.</li>
+      <li>
+        Regenerate until you get a phrase that sticks, then commit to it. Rerolling the whole phrase
+        costs nothing; editing it does.
+      </li>
+      <li>
+        Four words is a reasonable floor for a low-value account, six for anything that matters, and
+        seven or eight for a password manager&rsquo;s master password.
+      </li>
+    </ul>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    generatePassphrase,
+    generatePassphrases,
+    wordlistById,
+    type Capitalization,
+    type PassphraseOptions,
+    type SeparatorId,
+    type WordlistId,
+  } from "../../lib/passphrase";
+  import { passphraseEntropy } from "../../lib/entropy";
+  import { attachBulk, attachCopy, el, loadPrefs, renderStrength, savePrefs } from "../../lib/ui";
+  import { ICONS } from "../../data/icons";
+
+  const PREFS_KEY = "tt-passphrase";
+
+  const countInput = el<HTMLInputElement>("#word-count");
+  const countValue = el<HTMLElement>("#word-count-value");
+  const wordlistSelect = el<HTMLSelectElement>("#wordlist");
+  const separatorSelect = el<HTMLSelectElement>("#separator");
+  const capitalizationSelect = el<HTMLSelectElement>("#capitalization");
+  const includeNumber = el<HTMLInputElement>("#include-number");
+  const includeSymbol = el<HTMLInputElement>("#include-symbol");
+  const hint = el<HTMLElement>("#wordlist-hint");
+  const result = el<HTMLOutputElement>("#result");
+  const errorBox = el<HTMLParagraphElement>("#result-error");
+  const strength = el<HTMLElement>("#strength");
+
+  const DEFAULTS = {
+    wordCount: Number(countInput.value),
+    wordlistId: "eff-large" as WordlistId,
+    separator: "dash" as SeparatorId,
+    capitalization: "lowercase" as Capitalization,
+    includeNumber: false,
+    includeSymbol: false,
+  };
+
+  /** Loaded lists are cached so switching back and forth costs one import each. */
+  const cache = new Map<WordlistId, readonly string[]>();
+  let words: readonly string[] = [];
+
+  function restore(): void {
+    const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+    countInput.value = String(prefs.wordCount ?? DEFAULTS.wordCount);
+    wordlistSelect.value = prefs.wordlistId ?? DEFAULTS.wordlistId;
+    separatorSelect.value = prefs.separator ?? DEFAULTS.separator;
+    capitalizationSelect.value = prefs.capitalization ?? DEFAULTS.capitalization;
+    includeNumber.checked = Boolean(prefs.includeNumber);
+    includeSymbol.checked = Boolean(prefs.includeSymbol);
+
+    // A stored value for a list or separator we no longer ship would leave the
+    // select blank; fall back to the default in that case.
+    if (!wordlistSelect.value) wordlistSelect.value = DEFAULTS.wordlistId;
+    if (!separatorSelect.value) separatorSelect.value = DEFAULTS.separator;
+    if (!capitalizationSelect.value) capitalizationSelect.value = DEFAULTS.capitalization;
+  }
+
+  function readOptions(): PassphraseOptions {
+    return {
+      wordCount: Number(countInput.value),
+      wordlistId: wordlistSelect.value as WordlistId,
+      separator: separatorSelect.value as SeparatorId,
+      capitalization: capitalizationSelect.value as Capitalization,
+      includeNumber: includeNumber.checked,
+      includeSymbol: includeSymbol.checked,
+    };
+  }
+
+  async function ensureWordlist(id: WordlistId): Promise<readonly string[]> {
+    const cached = cache.get(id);
+    if (cached) return cached;
+    const loaded = await wordlistById(id).load();
+    cache.set(id, loaded);
+    return loaded;
+  }
+
+  function paint(): void {
+    const options = readOptions();
+    countValue.textContent = countInput.value;
+
+    const list = wordlistById(options.wordlistId);
+    hint.textContent = `${list.note}`;
+
+    savePrefs(PREFS_KEY, options);
+
+    if (words.length === 0) return;
+
+    try {
+      result.textContent = generatePassphrase(words, options);
+      delete result.dataset["empty"];
+      errorBox.hidden = true;
+      renderStrength(strength, passphraseEntropy(options, words.length));
+    } catch (error) {
+      errorBox.textContent = error instanceof Error ? error.message : "Could not generate.";
+      errorBox.hidden = false;
+      result.textContent = "—";
+      result.dataset["empty"] = "true";
+      renderStrength(strength, 0);
+    }
+  }
+
+  /** Swaps the active wordlist if needed, then repaints. */
+  async function update(): Promise<void> {
+    const id = readOptions().wordlistId;
+    if (cache.get(id) !== words) {
+      try {
+        words = await ensureWordlist(id);
+      } catch {
+        errorBox.textContent = "Could not load the wordlist. Reload the page to try again.";
+        errorBox.hidden = false;
+        return;
+      }
+    }
+    paint();
+  }
+
+  restore();
+  void update();
+
+  countInput.addEventListener("input", paint);
+  for (const input of [separatorSelect, capitalizationSelect, includeNumber, includeSymbol]) {
+    input.addEventListener("change", paint);
+  }
+  wordlistSelect.addEventListener("change", () => void update());
+  el<HTMLButtonElement>("#regenerate").addEventListener("click", paint);
+  attachCopy(el<HTMLButtonElement>("#copy"), () => (result.dataset["empty"] ? "" : result.textContent ?? ""));
+
+  attachBulk({
+    generate: (count) => (words.length === 0 ? [] : generatePassphrases(words, readOptions(), count)),
+    filename: "passphrases.txt",
+    copyIcon: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.copy}</svg>`,
+  });
+</script>

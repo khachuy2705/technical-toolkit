@@ -1,0 +1,108 @@
+---
+/**
+ * Cycles light -> dark -> system. The stored value is read by the inline script
+ * in BaseLayout before first paint; this component only writes it and swaps the
+ * visible icon.
+ */
+---
+
+<button
+  type="button"
+  id="theme-toggle"
+  class="btn btn--icon"
+  data-active="system"
+  aria-label="Change colour theme"
+  title="Change colour theme"
+>
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="18"
+    height="18"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <g data-icon="light">
+      <circle cx="12" cy="12" r="4"></circle>
+      <path d="M12 2v2"></path>
+      <path d="M12 20v2"></path>
+      <path d="m4.93 4.93 1.41 1.41"></path>
+      <path d="m17.66 17.66 1.41 1.41"></path>
+      <path d="M2 12h2"></path>
+      <path d="M20 12h2"></path>
+      <path d="m6.34 17.66-1.41 1.41"></path>
+      <path d="m19.07 4.93-1.41 1.41"></path>
+    </g>
+    <g data-icon="dark">
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+    </g>
+    <g data-icon="system">
+      <rect width="20" height="14" x="2" y="3" rx="2"></rect>
+      <path d="M8 21h8"></path>
+      <path d="M12 17v4"></path>
+    </g>
+  </svg>
+</button>
+
+<style>
+  /* Driven by CSS rather than the `hidden` attribute: `hidden` is not a valid
+     SVG presentation attribute, so relying on it is a browser-quirk gamble. */
+  #theme-toggle [data-icon] {
+    display: none;
+  }
+
+  #theme-toggle[data-active="light"] [data-icon="light"],
+  #theme-toggle[data-active="dark"] [data-icon="dark"],
+  #theme-toggle[data-active="system"] [data-icon="system"] {
+    display: inline;
+  }
+</style>
+
+<script>
+  type Theme = "light" | "dark" | "system";
+
+  const ORDER: Theme[] = ["light", "dark", "system"];
+  const STORAGE_KEY = "tt-theme";
+
+  const button = document.getElementById("theme-toggle");
+
+  if (button) {
+    const read = (): Theme => {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored === "light" || stored === "dark") return stored;
+      } catch {
+        // Storage throws in some private windows; fall through to the default.
+      }
+      return "system";
+    };
+
+    const apply = (theme: Theme) => {
+      if (theme === "system") {
+        document.documentElement.removeAttribute("data-theme");
+      } else {
+        document.documentElement.setAttribute("data-theme", theme);
+      }
+
+      try {
+        if (theme === "system") localStorage.removeItem(STORAGE_KEY);
+        else localStorage.setItem(STORAGE_KEY, theme);
+      } catch {
+        // The theme still applies for this page view.
+      }
+
+      button.dataset["active"] = theme;
+      button.title = `Theme: ${theme}`;
+      button.setAttribute("aria-label", `Colour theme: ${theme}. Click to change.`);
+    };
+
+    apply(read());
+    button.addEventListener("click", () => {
+      apply(ORDER[(ORDER.indexOf(read()) + 1) % ORDER.length]!);
+    });
+  }
+</script>

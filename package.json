@@ -1,0 +1,29 @@
+{
+  "name": "technical-toolkit",
+  "type": "module",
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro check && astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "verify": "esbuild scripts/verify.ts --bundle --platform=node --format=esm --target=node22 --outfile=node_modules/.cache/verify.mjs --log-level=error && node node_modules/.cache/verify.mjs",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^7.3.2"
+  },
+  "allowScripts": {
+    "esbuild": true
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "@types/node": "^22.20.3",
+    "esbuild": "^0.28.2",
+    "typescript": "~6.0.3"
+  },
+  "private": true
+}
