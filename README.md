@@ -5,6 +5,9 @@ there is no backend, no database, and no network request after the page loads.
 
 Live tools: **password generator**, **passphrase generator**.
 
+[design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
+and the security decisions. Read it before adding a tool.
+
 ## Stack
 
 | | |
@@ -57,7 +60,7 @@ src/
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
 │   ├── ui.ts            DOM helpers used by the tool page scripts
-│   └── wordlists/       EFF diceware lists, loaded via dynamic import
+│   └── wordlists/       Superhero + EFF lists, loaded via dynamic import
 ├── layouts/             BaseLayout (head/SEO/theme) and ToolLayout
 ├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel…
 ├── pages/
@@ -101,5 +104,7 @@ styles and a handful of inline `style` attributes.
 
 ## Credits
 
-Wordlists are the [EFF diceware lists](https://www.eff.org/dice) (large: 7,776 words; short: 1,296),
-released into the public domain. Icon geometry follows [Lucide](https://lucide.dev) (ISC).
+Wordlists: the [EFF diceware lists](https://www.eff.org/dice) (large: 7,776 words; short: 1,296)
+and the [BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
+(2,048 words), all public domain. The 101-word superhero list is the project's own, kept as
+`src/lib/wordlists/superhero.txt`. Icon geometry follows [Lucide](https://lucide.dev) (ISC).

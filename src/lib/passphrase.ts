@@ -12,7 +12,7 @@ export interface Wordlist {
   readonly load: () => Promise<readonly string[]>;
 }
 
-export type WordlistId = 'eff-large' | 'eff-short';
+export type WordlistId = 'bip39-en' | 'superhero' | 'eff-large' | 'eff-short';
 
 /**
  * Wordlists load on demand: the large list is ~60 KB of source, and the
@@ -20,17 +20,31 @@ export type WordlistId = 'eff-large' | 'eff-short';
  */
 export const WORDLISTS: readonly Wordlist[] = [
   {
+    id: 'bip39-en',
+    label: 'BIP39 English',
+    size: 2048,
+    note: 'exactly 11 bits per word; every word is unique in its first four letters',
+    load: async () => (await import('./wordlists/bip39-en')).BIP39_EN,
+  },
+  {
+    id: 'superhero',
+    label: 'Superheroes',
+    size: 101,
+    note: 'short and memorable, so it needs roughly twice as many words',
+    load: async () => (await import('./wordlists/superhero')).SUPERHERO,
+  },
+  {
     id: 'eff-large',
     label: 'EFF Large',
     size: 7776,
-    note: '12.9 bits per word — the standard diceware list.',
+    note: 'the standard diceware list',
     load: async () => (await import('./wordlists/eff-large')).EFF_LARGE,
   },
   {
     id: 'eff-short',
     label: 'EFF Short',
     size: 1296,
-    note: '10.3 bits per word — shorter, easier to type and remember.',
+    note: 'shorter EFF list, easier to type',
     load: async () => (await import('./wordlists/eff-short')).EFF_SHORT,
   },
 ] as const;
@@ -41,14 +55,52 @@ export function wordlistById(id: WordlistId): Wordlist {
   return found;
 }
 
-export type SeparatorId = 'dash' | 'dot' | 'underscore' | 'space' | 'none' | 'digit' | 'symbol';
+/**
+ * The combined draw pool for a set of lists, with duplicates removed.
+ *
+ * Deduplication is not tidiness, it is correctness. The lists overlap heavily —
+ * 870 words are in both BIP39 and the EFF large list — and a plain concatenation
+ * would do two wrong things at once: report `log2(total)` bits for a pool that
+ * does not have that many distinct words, and make every shared word twice as
+ * likely to be drawn as an unshared one.
+ *
+ * Insertion order is preserved so the pool is stable across calls, which keeps
+ * anything derived from an index reproducible.
+ */
+export function mergeWordlists(lists: readonly (readonly string[])[]): readonly string[] {
+  const seen = new Set<string>();
+  for (const list of lists) {
+    for (const word of list) seen.add(word);
+  }
+  return [...seen];
+}
+
+/** Loads every selected list and merges them into one pool. */
+export async function loadWordlists(ids: readonly WordlistId[]): Promise<readonly string[]> {
+  const loaded = await Promise.all(ids.map((id) => wordlistById(id).load()));
+  return mergeWordlists(loaded);
+}
+
+export type SeparatorId =
+  | 'dash'
+  | 'dot'
+  | 'underscore'
+  | 'space'
+  | 'none'
+  | 'digit'
+  | 'symbol'
+  | 'custom';
 export type Capitalization = 'lowercase' | 'title' | 'uppercase' | 'random-word';
 
 interface SeparatorSpec {
   readonly id: SeparatorId;
   readonly label: string;
-  /** Fixed text, or `null` when a fresh random character is drawn each time. */
-  readonly value: string | null;
+  /**
+   * `fixed` uses `value`; `random` draws a fresh character per gap and is the
+   * only kind that contributes entropy; `custom` reads `opts.customSeparator`.
+   */
+  readonly kind: 'fixed' | 'random' | 'custom';
+  readonly value?: string;
 }
 
 /** Drawn between words when the separator is set to "random symbol". */
@@ -65,19 +117,32 @@ export const SEPARATOR_SYMBOLS = '!@#$%^&*-_=+?';
 export const SUFFIX_SYMBOLS = '!@#$%&*+?';
 
 export const SEPARATORS: readonly SeparatorSpec[] = [
-  { id: 'dash', label: 'Hyphen  -', value: '-' },
-  { id: 'dot', label: 'Dot  .', value: '.' },
-  { id: 'underscore', label: 'Underscore  _', value: '_' },
-  { id: 'space', label: 'Space', value: ' ' },
-  { id: 'none', label: 'None', value: '' },
-  { id: 'digit', label: 'Random digit', value: null },
-  { id: 'symbol', label: 'Random symbol', value: null },
+  { id: 'dash', label: 'Hyphen  -', kind: 'fixed', value: '-' },
+  { id: 'dot', label: 'Dot  .', kind: 'fixed', value: '.' },
+  { id: 'underscore', label: 'Underscore  _', kind: 'fixed', value: '_' },
+  { id: 'space', label: 'Space', kind: 'fixed', value: ' ' },
+  { id: 'none', label: 'None', kind: 'fixed', value: '' },
+  { id: 'digit', label: 'Random digit', kind: 'random' },
+  { id: 'symbol', label: 'Random symbol', kind: 'random' },
+  { id: 'custom', label: 'Custom…', kind: 'custom' },
 ];
+
+export function separatorById(id: SeparatorId): SeparatorSpec {
+  const found = SEPARATORS.find((s) => s.id === id);
+  if (!found) throw new Error(`Unknown separator: ${id}`);
+  return found;
+}
+
+/** A custom separator longer than this is almost certainly a mistake. */
+export const CUSTOM_SEPARATOR_MAX = 8;
 
 export interface PassphraseOptions {
   wordCount: number;
-  wordlistId: WordlistId;
+  /** One or more lists, merged and deduplicated into a single draw pool. */
+  wordlistIds: readonly WordlistId[];
   separator: SeparatorId;
+  /** Used only when `separator` is `'custom'`. May be empty. */
+  customSeparator: string;
   capitalization: Capitalization;
   /** Append a random digit to one random word. */
   includeNumber: boolean;
@@ -87,23 +152,19 @@ export interface PassphraseOptions {
 
 export const DEFAULT_PASSPHRASE_OPTIONS: PassphraseOptions = {
   wordCount: WORD_COUNT_DEFAULT,
-  wordlistId: 'eff-large',
+  wordlistIds: ['bip39-en', 'superhero'],
   separator: 'dash',
+  customSeparator: '-',
   capitalization: 'lowercase',
-  includeNumber: false,
+  includeNumber: true,
   includeSymbol: false,
 };
 
-/** How many separators sit between `wordCount` words. */
-export function separatorCount(wordCount: number): number {
-  return Math.max(0, wordCount - 1);
-}
-
-function drawSeparator(id: SeparatorId): string {
-  const spec = SEPARATORS.find((s) => s.id === id);
-  if (!spec) throw new Error(`Unknown separator: ${id}`);
-  if (spec.value !== null) return spec.value;
-  return id === 'digit' ? String(randomInt(10)) : pick([...SEPARATOR_SYMBOLS]);
+function drawSeparator(opts: PassphraseOptions): string {
+  const spec = separatorById(opts.separator);
+  if (spec.kind === 'fixed') return spec.value ?? '';
+  if (spec.kind === 'custom') return opts.customSeparator.slice(0, CUSTOM_SEPARATOR_MAX);
+  return opts.separator === 'digit' ? String(randomInt(10)) : pick([...SEPARATOR_SYMBOLS]);
 }
 
 function capitalize(word: string): string {
@@ -128,13 +189,11 @@ function applyCapitalization(words: string[], mode: Capitalization): string[] {
 }
 
 export function validatePassphraseOptions(opts: PassphraseOptions): string | null {
+  if (opts.wordlistIds.length === 0) return 'Select at least one wordlist.';
   if (!Number.isInteger(opts.wordCount) || opts.wordCount < WORD_COUNT_MIN) {
     return `Use at least ${WORD_COUNT_MIN} words.`;
   }
   if (opts.wordCount > WORD_COUNT_MAX) return `Use at most ${WORD_COUNT_MAX} words.`;
-  if (opts.separator === 'none' && opts.capitalization === 'lowercase') {
-    return null; // Legal, just harder to read — the UI warns separately.
-  }
   return null;
 }
 
@@ -156,7 +215,7 @@ export function generatePassphrase(words: readonly string[], opts: PassphraseOpt
   if (opts.includeNumber) decorate(String(randomInt(10)));
   if (opts.includeSymbol) decorate(pick([...SUFFIX_SYMBOLS]));
 
-  return parts.reduce((acc, word, i) => (i === 0 ? word : acc + drawSeparator(opts.separator) + word), '');
+  return parts.reduce((acc, word, i) => (i === 0 ? word : acc + drawSeparator(opts) + word), '');
 }
 
 export function generatePassphrases(

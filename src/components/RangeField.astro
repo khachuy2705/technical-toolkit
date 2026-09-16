@@ -1,0 +1,65 @@
+---
+/**
+ * A numeric control with three ways in: drag the slider, type an exact value,
+ * or step with the buttons. The range input is the canonical value holder —
+ * `bindStepper` in lib/ui.ts keeps the number box in sync with it.
+ */
+interface Props {
+  /** Base id. The range gets `id`, the number box `${id}-number`. */
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+}
+
+const { id, label, min, max, value } = Astro.props;
+const noun = label.toLowerCase();
+---
+
+<div class="field">
+  <div class="field__label">
+    <label for={`${id}-number`}>{label}</label>
+
+    <span class="stepper">
+      <button
+        type="button"
+        class="stepper__btn"
+        data-step-for={id}
+        data-step="-1"
+        aria-label={`Decrease ${noun}`}
+        title={`Decrease ${noun}`}>&minus;</button>
+
+      <input
+        class="stepper__input"
+        type="number"
+        id={`${id}-number`}
+        min={min}
+        max={max}
+        value={value}
+        step="1"
+        inputmode="numeric"
+      />
+
+      <button
+        type="button"
+        class="stepper__btn"
+        data-step-for={id}
+        data-step="1"
+        aria-label={`Increase ${noun}`}
+        title={`Increase ${noun}`}>+</button>
+    </span>
+  </div>
+
+  <input
+    type="range"
+    id={id}
+    min={min}
+    max={max}
+    value={value}
+    step="1"
+    aria-label={`${label} slider`}
+  />
+
+  <slot />
+</div>

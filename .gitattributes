@@ -1,0 +1,9 @@
+# The repository is LF-only. Editors and scripts on Windows readily write CRLF
+# back into a file they rewrite, which turns a two-line edit into a whole-file
+# diff; this normalises on the way in regardless of anyone's core.autocrlf.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

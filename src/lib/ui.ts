@@ -77,18 +77,64 @@ export function renderStrength(root: HTMLElement, bits: number): void {
   el("[data-strength-time]", root).textContent = crackTime(bits);
 }
 
-/** Keeps a range input and its numeric read-out in sync. */
-export function bindRange(
-  input: HTMLInputElement,
-  output: HTMLElement,
-  onChange: () => void,
-): void {
-  const sync = () => {
-    output.textContent = input.value;
+export interface Stepper {
+  /** Current value, already clamped to the field's range. */
+  value: () => number;
+  /** Sets both inputs without firing `onChange` — for restoring saved settings. */
+  set: (value: number) => void;
+}
+
+/**
+ * Wires a RangeField: slider, number box and the two step buttons all drive one
+ * value. The range input stays canonical; the number box mirrors it.
+ */
+export function bindStepper(id: string, onChange: () => void): Stepper {
+  const range = el<HTMLInputElement>(`#${id}`);
+  const box = el<HTMLInputElement>(`#${id}-number`);
+  const min = Number(range.min);
+  const max = Number(range.max);
+
+  const write = (value: number) => {
+    const clamped = Math.min(max, Math.max(min, value));
+    range.value = String(clamped);
+    box.value = String(clamped);
+    return clamped;
+  };
+
+  const commit = (value: number) => {
+    write(value);
     onChange();
   };
-  input.addEventListener("input", sync);
-  output.textContent = input.value;
+
+  range.addEventListener("input", () => {
+    box.value = range.value;
+    onChange();
+  });
+
+  // While typing, follow the box only once it holds a legal value. Clamping on
+  // every keystroke would rewrite "1" to the minimum before the user can reach
+  // "12", which makes the box unusable for anything above single digits.
+  box.addEventListener("input", () => {
+    const parsed = Number.parseInt(box.value, 10);
+    if (Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+      range.value = String(parsed);
+      onChange();
+    }
+  });
+
+  // Blur or Enter is where an empty or out-of-range box gets corrected.
+  box.addEventListener("change", () => {
+    const parsed = Number.parseInt(box.value, 10);
+    commit(Number.isFinite(parsed) ? parsed : Number(range.value));
+  });
+
+  for (const button of all<HTMLButtonElement>(`[data-step-for="${id}"]`)) {
+    button.addEventListener("click", () => {
+      commit(Number(range.value) + Number(button.dataset["step"]));
+    });
+  }
+
+  return { value: () => Number(range.value), set: write };
 }
 
 /** Clamps a number input to its own min/max, falling back to `fallback` on junk. */

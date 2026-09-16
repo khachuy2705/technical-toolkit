@@ -677,13 +677,6 @@ a.tool-card:hover {
   color: var(--text-muted);
 }
 
-.field__value {
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--accent);
-}
-
 .field__hint {
   font-size: 0.78rem;
   color: var(--text-faint);
@@ -694,6 +687,86 @@ a.tool-card:hover {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+
+/* Three ways into one number: drag, type, or step. The buttons exist because
+   nudging a length by one is the most common adjustment and dragging a 6-128
+   slider to an exact value is fiddly. */
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.stepper__btn {
+  width: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stepper__btn:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.stepper__input {
+  width: 3.4rem;
+  padding: 0.28rem 0;
+  border: 0;
+  border-inline: 1px solid var(--border);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* The native spinners duplicate the step buttons and are far too small to hit. */
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Inset, because the container clips overflow and a normal ring would vanish. */
+.stepper__btn:focus-visible,
+.stepper__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.text-input {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+.text-input::placeholder {
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+}
+
+.field__sub[hidden] {
+  display: none;
 }
 
 input[type="range"] {

@@ -9,9 +9,9 @@
  */
 
 import {
-  SEPARATORS,
   SEPARATOR_SYMBOLS,
   SUFFIX_SYMBOLS,
+  separatorById,
   type PassphraseOptions,
 } from './passphrase';
 
@@ -32,9 +32,10 @@ export function passphraseEntropy(opts: PassphraseOptions, listSize: number): nu
 
   let bits = Math.log2(listSize) * opts.wordCount;
 
+  // Only a freshly drawn separator adds anything. A fixed one — including a
+  // custom string the user typed — is part of the scheme the attacker knows.
   const gaps = Math.max(0, opts.wordCount - 1);
-  const separator = SEPARATORS.find((s) => s.id === opts.separator);
-  if (separator?.value === null) {
+  if (separatorById(opts.separator).kind === 'random') {
     bits += gaps * Math.log2(opts.separator === 'digit' ? 10 : SEPARATOR_SYMBOLS.length);
   }
 
