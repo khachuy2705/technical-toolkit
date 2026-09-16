@@ -27,8 +27,13 @@ const PRESETS = ["192.168.1.10/24", "10.0.0.0/8", "172.16.5.3/30", "203.0.113.7/
  * The cheat sheet is generated from the same `describeNetwork` the calculator
  * above uses, not typed out. A hand-written table drifts from the code, and the
  * /31 and /32 rows are exactly where printed cheat sheets get it wrong.
+ *
+ * Runs /32 down to /1: smallest subnet first is how these tables are usually
+ * read, since you start from the host count you need. /0 is left out — it is the
+ * default route rather than a subnet anyone sizes.
  */
-const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
+const CHEAT_SHEET = Array.from({ length: 32 }, (_, index) => {
+  const prefix = 32 - index;
   const net = describeNetwork(0, prefix);
   return {
     prefix,
@@ -117,8 +122,8 @@ const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
     <div class="table-wrap">
       <table class="sheet">
         <caption class="visually-hidden">
-          CIDR prefix, subnet mask, wildcard mask, total addresses and usable hosts for every
-          IPv4 prefix length.
+          CIDR prefix, subnet mask, wildcard mask, total addresses and usable hosts, from /32 down
+          to /1. Each subnet mask has a button that copies it.
         </caption>
         <thead>
           <tr>
@@ -134,7 +139,20 @@ const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
             CHEAT_SHEET.map((row) => (
               <tr data-common={row.common ? "" : undefined}>
                 <th scope="row" class="sheet__cidr">/{row.prefix}</th>
-                <td>{row.mask}</td>
+                <td>
+                  <span class="sheet__mask">
+                    {row.mask}
+                    <button
+                      type="button"
+                      class="sheet__copy"
+                      data-copy-mask={row.mask}
+                      title={`Copy ${row.mask}`}
+                      aria-label={`Copy the subnet mask for /${row.prefix}, ${row.mask}`}
+                    >
+                      <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+                    </button>
+                  </span>
+                </td>
                 <td>{row.wildcard}</td>
                 <td class="sheet__num">{row.total}</td>
                 <td class="sheet__num">{row.usable}</td>
@@ -149,7 +167,7 @@ const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
       Generated from the same arithmetic as the calculator above, so the two can never disagree.
       The <code>/31</code> and <code>/32</code> rows say 2 and 1 usable hosts — most printed cheat
       sheets say 0 and &minus;1 there, or leave them out. The highlighted rows are the old classful
-      boundaries.
+      boundaries, and every subnet mask has a button that copies it.
     </p>
   </section>
 
@@ -322,6 +340,11 @@ const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
   for (const button of all<HTMLButtonElement>("[data-copy]")) {
     const id = button.dataset["copy"]!;
     attachCopy(button, () => current.get(id) ?? "");
+  }
+
+  // Cheat sheet rows carry their own value, so there is nothing to look up.
+  for (const button of all<HTMLButtonElement>("[data-copy-mask]")) {
+    attachCopy(button, () => button.dataset["copyMask"] ?? "");
   }
 
   run();

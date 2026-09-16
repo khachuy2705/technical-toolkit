@@ -336,11 +336,15 @@ Three details that separate a correct calculator from a plausible one:
 Address classification covers RFC 1918 private space, loopback, link-local, CGNAT, the three
 documentation ranges, multicast, reserved and limited broadcast, matched most-specific-first.
 
-Below the results sits a **cheat sheet**: all 33 prefix lengths against their subnet mask, wildcard
-mask, total addresses and usable hosts. It is generated at build time from the same
-`describeNetwork` the calculator runs, not typed out, so the table and the tool cannot disagree —
-and the `/31` and `/32` rows come out as 2 and 1 usable hosts rather than the 0 and −1 that printed
-cheat sheets tend to carry. The 33 mask strings are pinned in the suite, because a regression there
+Below the results sits a **cheat sheet**: /32 down to /1 against their subnet mask, wildcard mask,
+total addresses and usable hosts, with a copy button on every mask. Descending order is how these
+tables are read — you start from the host count you need. `/0` is left out, being the default route
+rather than a subnet anyone sizes.
+
+It is generated at build time from the same `describeNetwork` the calculator runs, not typed out,
+so the table and the tool cannot disagree — and the `/31` and `/32` rows come out as 2 and 1 usable
+hosts rather than the 0 and −1 that printed cheat sheets tend to carry. All 33 mask strings are
+pinned in the suite (the lib covers /0 even where the table does not), because a regression there
 would publish a wrong reference table to every visitor. The table is the one element allowed to
 scroll sideways; the page body is not.
 

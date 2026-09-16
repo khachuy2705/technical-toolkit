@@ -1113,6 +1113,35 @@ select {
   background: var(--accent-soft);
 }
 
+/* The copy button sits inside the cell rather than replacing it, so the mask is
+   still selectable text. Faint until hovered: 32 of these must not shout. */
+.sheet__mask {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.sheet__copy {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  line-height: 0;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.sheet__copy:hover {
+  background: var(--surface-raised);
+  color: var(--accent);
+}
+
+.sheet__copy[data-copied="true"] {
+  color: var(--strength-4);
+}
+
 .sheet__num {
   text-align: right;
   font-variant-numeric: tabular-nums;
