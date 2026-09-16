@@ -2,6 +2,7 @@
 import ToolLayout from "../../layouts/ToolLayout.astro";
 import Icon from "../../components/Icon.astro";
 import { ICONS } from "../../data/icons";
+import { describeNetwork, formatIpv4 } from "../../lib/ipv4";
 
 /**
  * The four the tool was asked for come first and carry the accent; the rest is
@@ -21,6 +22,24 @@ const FACTS = [
 ] as const;
 
 const PRESETS = ["192.168.1.10/24", "10.0.0.0/8", "172.16.5.3/30", "203.0.113.7/31", "10.1.2.3/32"];
+
+/**
+ * The cheat sheet is generated from the same `describeNetwork` the calculator
+ * above uses, not typed out. A hand-written table drifts from the code, and the
+ * /31 and /32 rows are exactly where printed cheat sheets get it wrong.
+ */
+const CHEAT_SHEET = Array.from({ length: 33 }, (_, prefix) => {
+  const net = describeNetwork(0, prefix);
+  return {
+    prefix,
+    mask: formatIpv4(net.mask),
+    wildcard: formatIpv4(net.wildcard),
+    total: net.totalAddresses.toLocaleString("en-US"),
+    usable: net.usableHosts.toLocaleString("en-US"),
+    /** The old classful boundaries — the rows people come to look up. */
+    common: prefix === 8 || prefix === 16 || prefix === 24,
+  };
+});
 ---
 
 <ToolLayout slug="subnet-calculator">
@@ -91,6 +110,48 @@ const PRESETS = ["192.168.1.10/24", "10.0.0.0/8", "172.16.5.3/30", "203.0.113.7/
       <span class="fact__binary" data-value="binary"></span>
     </li>
   </ul>
+
+  <section class="card">
+    <h2 class="card__title">Subnet cheat sheet</h2>
+
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          CIDR prefix, subnet mask, wildcard mask, total addresses and usable hosts for every
+          IPv4 prefix length.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">CIDR</th>
+            <th scope="col">Subnet mask</th>
+            <th scope="col">Wildcard</th>
+            <th scope="col" class="sheet__num">Addresses</th>
+            <th scope="col" class="sheet__num">Usable hosts</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            CHEAT_SHEET.map((row) => (
+              <tr data-common={row.common ? "" : undefined}>
+                <th scope="row" class="sheet__cidr">/{row.prefix}</th>
+                <td>{row.mask}</td>
+                <td>{row.wildcard}</td>
+                <td class="sheet__num">{row.total}</td>
+                <td class="sheet__num">{row.usable}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Generated from the same arithmetic as the calculator above, so the two can never disagree.
+      The <code>/31</code> and <code>/32</code> rows say 2 and 1 usable hosts — most printed cheat
+      sheets say 0 and &minus;1 there, or leave them out. The highlighted rows are the old classful
+      boundaries.
+    </p>
+  </section>
 
   <section class="card prose">
     <h2>Where the two lost addresses go</h2>

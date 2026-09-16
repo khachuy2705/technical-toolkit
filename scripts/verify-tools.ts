@@ -247,6 +247,28 @@ export async function runToolChecks(check: Check): Promise<void> {
       Array.from({ length: 33 }, (_, i) => i).every((p) => prefixFromMask(maskFromPrefix(p)) === p),
     );
 
+    // The cheat sheet on the page is generated from maskFromPrefix, so these 33
+    // strings are published reference data. Pinned in full: a regression here
+    // would quietly hand every visitor a wrong table.
+    const MASKS: readonly string[] = [
+      "0.0.0.0", "128.0.0.0", "192.0.0.0", "224.0.0.0",
+      "240.0.0.0", "248.0.0.0", "252.0.0.0", "254.0.0.0",
+      "255.0.0.0", "255.128.0.0", "255.192.0.0", "255.224.0.0",
+      "255.240.0.0", "255.248.0.0", "255.252.0.0", "255.254.0.0",
+      "255.255.0.0", "255.255.128.0", "255.255.192.0", "255.255.224.0",
+      "255.255.240.0", "255.255.248.0", "255.255.252.0", "255.255.254.0",
+      "255.255.255.0", "255.255.255.128", "255.255.255.192", "255.255.255.224",
+      "255.255.255.240", "255.255.255.248", "255.255.255.252", "255.255.255.254",
+      "255.255.255.255",
+    ];
+    const rendered = MASKS.map((_, prefix) => formatIpv4(maskFromPrefix(prefix)));
+    const firstWrong = rendered.findIndex((m, i) => m !== MASKS[i]);
+    check(
+      "the full /0-/32 mask table is correct",
+      firstWrong === -1,
+      firstWrong === -1 ? "" : `/${firstWrong}: ${rendered[firstWrong]} vs ${MASKS[firstWrong]}`,
+    );
+
     let gappy = false;
     try { prefixFromMask(parseIpv4("255.255.0.255")); } catch { gappy = true; }
     check("rejects a non-contiguous mask", gappy);

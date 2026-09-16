@@ -34,7 +34,7 @@ unconditional.
 |---|---|---|
 | Framework | Astro 7, `output: 'static'` | Ships zero JS by default. Component reuse at build time, plain HTML at runtime. |
 | Language | TypeScript, `strict` | The generators are the kind of code where an off-by-one is a security bug. |
-| Styling | Hand-written CSS, custom properties | ~1300 lines total. A utility framework would ship more bytes than the entire site. |
+| Styling | Hand-written CSS, custom properties | ~1400 lines total. A utility framework would ship more bytes than the entire site. |
 | Client JS | Vanilla ES modules | Forms, meters and two textareas. A UI framework would be the single largest asset on the page. |
 | Hosting | Vercel, static output | No adapter, no serverless function, no runtime. |
 | Verification | `scripts/verify.ts` in Node | See §9. |
@@ -115,8 +115,8 @@ src/
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 1678 lines of logic in `lib/`, 582 of components and layouts, 1795 of pages, 1343 of
-CSS, 713 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 1678 lines of logic in `lib/`, 582 of components and layouts, 1856 of pages, 1405 of
+CSS, 735 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -336,6 +336,14 @@ Three details that separate a correct calculator from a plausible one:
 Address classification covers RFC 1918 private space, loopback, link-local, CGNAT, the three
 documentation ranges, multicast, reserved and limited broadcast, matched most-specific-first.
 
+Below the results sits a **cheat sheet**: all 33 prefix lengths against their subnet mask, wildcard
+mask, total addresses and usable hosts. It is generated at build time from the same
+`describeNetwork` the calculator runs, not typed out, so the table and the tool cannot disagree —
+and the `/31` and `/32` rows come out as 2 and 1 usable hosts rather than the 0 and −1 that printed
+cheat sheets tend to carry. The 33 mask strings are pinned in the suite, because a regression there
+would publish a wrong reference table to every visitor. The table is the one element allowed to
+scroll sideways; the page body is not.
+
 ### 6.8 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
@@ -483,7 +491,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 190 checks, Node, no browser
+npm run verify   # 191 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -515,8 +523,9 @@ npm run build    # runs check first, then the static build
 - **YAML** — all three modes, indent and sort options, multi-document streams, error location, and
   two documented behaviours asserted so they cannot drift: comments are dropped by reformatting,
   and unquoted `NO` stays a string under the 1.2 core schema.
-- **IPv4** — parsing and rejection (malformed octets, leading zeros, non-contiguous masks), every
-  prefix round-tripping through its mask, five worked networks checked field by field, the /31 and
+- **IPv4** — parsing and rejection (malformed octets, leading zeros, non-contiguous masks), the
+  full /0–/32 mask table pinned as literals because the page publishes it, every prefix
+  round-tripping through its mask, five worked networks checked field by field, the /31 and
   /32 special cases, that usable hosts never go negative at any prefix, that high addresses stay
   unsigned, and eleven address-type classifications.
 - **Merging** — that the union drops duplicates, equals sum minus overlap, loses no source word,

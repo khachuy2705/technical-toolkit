@@ -1070,6 +1070,68 @@ select {
   margin-top: 0.7rem;
 }
 
+/* --------------------------------------------------------------------------- Reference table */
+
+/* The only element allowed to scroll sideways. The page body must not. */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  -webkit-overflow-scrolling: touch;
+}
+
+.sheet {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.sheet th,
+.sheet td {
+  padding: 0.38rem 0.75rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sheet thead th {
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.sheet tbody tr:nth-child(even) {
+  background: var(--bg-subtle);
+}
+
+.sheet tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.sheet__num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet__cidr {
+  font-weight: 650;
+  color: var(--accent);
+}
+
+/* /8, /16 and /24 are the ones people actually come to look up. */
+.sheet tr[data-common] td {
+  font-weight: 650;
+}
+
+.sheet tr[data-common] {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 /* --------------------------------------------------------------------------- Hash rows */
 
 .hash-list {
