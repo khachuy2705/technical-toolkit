@@ -12,7 +12,7 @@ export interface Wordlist {
   readonly load: () => Promise<readonly string[]>;
 }
 
-export type WordlistId = 'bip39-en' | 'superhero' | 'eff-large' | 'eff-short';
+export type WordlistId = 'bip39-en' | 'superhero' | 'eff-short';
 
 /**
  * Wordlists load on demand: the large list is ~60 KB of source, and the
@@ -34,13 +34,6 @@ export const WORDLISTS: readonly Wordlist[] = [
     load: async () => (await import('./wordlists/superhero')).SUPERHERO,
   },
   {
-    id: 'eff-large',
-    label: 'EFF Large',
-    size: 7776,
-    note: 'the standard diceware list',
-    load: async () => (await import('./wordlists/eff-large')).EFF_LARGE,
-  },
-  {
     id: 'eff-short',
     label: 'EFF Short',
     size: 1296,
@@ -59,7 +52,7 @@ export function wordlistById(id: WordlistId): Wordlist {
  * The combined draw pool for a set of lists, with duplicates removed.
  *
  * Deduplication is not tidiness, it is correctness. The lists overlap heavily —
- * 870 words are in both BIP39 and the EFF large list — and a plain concatenation
+ * 464 words are in both BIP39 and the EFF short list — and a plain concatenation
  * would do two wrong things at once: report `log2(total)` bits for a pool that
  * does not have that many distinct words, and make every shared word twice as
  * likely to be drawn as an unshared one.

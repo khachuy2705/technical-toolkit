@@ -64,7 +64,7 @@ src/
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts       Copy, with a non-secure-context fallback
 │   ├── ui.ts              THE ONE EXCEPTION: DOM helpers. See §4.
-│   └── wordlists/         BIP39, superhero and EFF lists as string modules
+│   └── wordlists/         BIP39, superhero and EFF short as string modules
 │
 ├── layouts/
 │   ├── BaseLayout.astro   <head>, SEO, theme no-flash script, header/footer
@@ -95,8 +95,8 @@ src/
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 800 lines of logic in `lib/`, 508 of components and layouts, 850 of pages, 1014 of
-CSS, 338 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 793 lines of logic in `lib/`, 508 of components and layouts, 849 of pages, 1014 of
+CSS, 341 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -194,7 +194,7 @@ Nothing else needs editing. The home page, nav, sitemap and cross-links pick it 
 | Control | Range / options | Default |
 |---|---|---|
 | Word count | 3 – 15 — slider, typed box, or ± buttons | 6 |
-| Wordlists | BIP39 English (2,048), Superheroes (101), EFF Large (7,776), EFF Short (1,296) — **any combination** | **BIP39 + Superheroes** |
+| Wordlists | BIP39 English (2,048), Superheroes (101), EFF Short (1,296) — **any combination** | **BIP39 + Superheroes** |
 | Separator | hyphen, dot, underscore, space, none, random digit, random symbol, **custom** | hyphen |
 | Custom separator | any text, capped at 8 characters | `-` |
 | Capitalisation | lowercase, Title Case, UPPERCASE, one random word uppercase | lowercase |
@@ -205,13 +205,15 @@ Nothing else needs editing. The home page, nav, sitemap and cross-links pick it 
 - **Lists combine.** Ticking several draws from the union of all of them. Merged pools are cached
   by the exact set that produced them, so toggling a list on and off costs one merge.
 - **Merging deduplicates, and that is correctness rather than tidiness.** The lists overlap
-  heavily — 870 words are in both BIP39 and the EFF large list; all four together hold 9,142
-  distinct words out of 11,221 raw entries. A plain concatenation would do two wrong things at
-  once: report `log2(11,221)` bits for a pool that does not have that many distinct words (0.30
+  heavily — 464 words are in both BIP39 and the EFF short list; all three together hold 2,967
+  distinct words out of 3,445 raw entries. A plain concatenation would do two wrong things at
+  once: report `log2(3,445)` bits for a pool that does not have that many distinct words (0.22
   bits per word too many), and make every shared word twice as likely to be drawn as an unshared
   one. The hint under the slider names the pool size and says how many words were shared.
-- Wordlists load via dynamic `import()`, so the password page never pays for the 62 KB large list
-  and a visitor who never ticks it never downloads it. Loaded lists are cached per page view.
+- Combining buys less than it looks: all three lists together are 11.54 bits per word against 11
+  for BIP39 alone. The pool is what matters, and pools grow logarithmically.
+- Wordlists load via dynamic `import()`, so the password page pays for none of them and a visitor
+  who never ticks a list never downloads it. Loaded lists are cached per page view.
 - The custom separator row is revealed only when the separator select is set to Custom. A typed
   separator is part of the scheme, not a secret, so it contributes **zero** bits — stated on the
   page itself rather than left for the user to assume.
@@ -343,7 +345,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 79 checks, Node, no browser
+npm run verify   # 81 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -357,19 +359,21 @@ npm run build    # runs check first, then the static build
 - **Structural properties** — length, character-class membership, the shuffle actually shuffling,
   no-repeats producing distinct characters, ambiguous glyphs fully removed.
 - **Option validation** — every impossible combination is rejected with a message.
-- **Wordlist integrity** — 7,776 and 1,296 entries, all unique, no whitespace.
+- **Wordlist integrity** — 2,048, 1,296 and 101 entries, all unique, no whitespace, and the
+  registry's advertised size matching the list actually loaded.
 - **Passphrase composition** — word count, separators, capitalisation modes, digit and symbol
   landing on different words, suffix symbols never colliding with separators, custom separators
   used verbatim and capped in length.
 - **Merging** — that the union drops duplicates, equals sum minus overlap, loses no source word,
   invents none, is order-stable across calls, and is unchanged by passing a list twice. BIP39 is
   additionally checked for its defining property: 2,048 words unique in their first four letters.
+- **Shipped pool sizes** — the default pool is 2,140 words and all three ticked is 2,967, asserted
+  as literals so adding or dropping a list cannot quietly change the entropy the page reports.
 
 **Structural passphrase assertions draw from BIP39, deliberately.** They split a phrase on its
-separator to count words, and the EFF lists ship four hyphenated entries (`drop-down`, `felt-tip`,
-`t-shirt`, `yo-yo`) that break that assumption roughly once in three hundred runs. BIP39 contains
-no punctuation at all, so the assertion tests the generator rather than the list. A dedicated check
-pins the hyphenated entries so the quirk stays on record.
+separator to count words, and the EFF short list ships a hyphenated entry (`yo-yo`) that breaks
+that assumption. BIP39 contains no punctuation at all, so the assertion tests the generator rather
+than the list. A dedicated check pins the hyphenated entry so the quirk stays on record.
 - **Registry accuracy** — the `size` advertised beside each wordlist matches the list actually
   loaded, so the bits-per-word note can never describe the wrong list.
 - **Entropy arithmetic** — exact bit values for known configurations, tier boundaries, and
@@ -398,9 +402,8 @@ Bundle sizes as built (gzip in brackets):
 | Password page script | 3.3 KB (1.6 KB) | password page |
 | Passphrase page script | 3.0 KB (1.5 KB) | passphrase page |
 | Superhero wordlist | 0.9 KB (0.6 KB) | passphrase page, on demand |
-| BIP39 English wordlist | 13.2 KB (6.3 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.2 KB (3.4 KB) | passphrase page, on demand |
-| EFF large wordlist | 62.2 KB (24.6 KB) | passphrase page, on demand |
+| BIP39 English wordlist | 13.2 KB (6.3 KB) | passphrase page, on demand |
 
 A tool page is about 6 KB of gzipped JavaScript before the wordlist.
 
@@ -435,9 +438,9 @@ Honest list, in rough order of how much they matter:
    not an oversight.
 7. **No internationalisation.** The UI is English-only, with no structure in place for anything
    else.
-8. **Hyphenated words in the EFF lists.** `drop-down`, `felt-tip`, `t-shirt` and `yo-yo` collide
-   with the hyphen separator, so such a phrase cannot be split back into its words unambiguously.
-   Entropy is unaffected and the words are EFF's own, so nothing is filtered; it is recorded here
-   because it surfaced as a flaky test before it was understood.
+8. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
+   such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
+   word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
+   test before it was understood.
 9. **Planned tools are registry entries only.** Hash, UUID, Base64 and JWT tools have cards and
    nothing behind them.

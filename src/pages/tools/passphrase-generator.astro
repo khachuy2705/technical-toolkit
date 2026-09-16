@@ -148,30 +148,30 @@ const CAPITALIZATIONS = [
   <section class="card prose">
     <h2>Why a passphrase</h2>
     <p>
-      Six words from the EFF large list is about 78 bits — stronger than a 12-character random
-      password, and something you can hold in your head after a couple of readings. The strength
-      comes from the number of words, not from how obscure they look.
+      Six words drawn from BIP39 is 66 bits, and six from BIP39 plus the superhero list is 68 —
+      in the same league as an eleven-character random password, and something you can hold in your
+      head after a couple of readings. The strength comes from the number of words, not from how
+      obscure they look.
     </p>
 
     <h2>How the entropy is counted</h2>
     <p>
       Each word contributes <code>log2(pool size)</code> bits, where the pool is every distinct
-      word across the lists you ticked: 11 bits from BIP39 alone, 12.92 from the EFF large list,
-      10.34 from the EFF short one, 6.66 from the superhero list. Random separators add a little
-      per gap; a single randomly uppercased word adds <code>log2(words)</code>. The appended digit
-      and symbol are counted by value only — their random position is real entropy that we
-      deliberately do not claim.
+      word across the lists you ticked: 11 bits from BIP39 alone, 10.34 from the EFF short list,
+      6.66 from the superhero list. Random separators add a little per gap; a single randomly
+      uppercased word adds <code>log2(words)</code>. The appended digit and symbol are counted by
+      value only — their random position is real entropy that we deliberately do not claim.
     </p>
     <p>
-      Combining lists helps less than it looks. They overlap heavily — 870 words appear in both
-      BIP39 and the EFF large list — and shared words are counted once, because counting them
+      Combining lists helps less than it looks. They overlap heavily — 464 words appear in both
+      BIP39 and the EFF short list — and shared words are counted once, because counting them
       twice would both overstate the pool and make those words twice as likely to be drawn.
-      Ticking every list gives 9,142 distinct words, 13.16 bits each, against 12.92 for the EFF
-      large list on its own.
+      Ticking all three gives 2,967 distinct words, 11.54 bits each, against 11 for BIP39 on its
+      own: three lists buy barely half a bit per word.
     </p>
     <p>
       A short list is not a weak list, it just needs more words. Roughly two superhero words buy
-      what one EFF word does, so twelve of them land near where six EFF words do.
+      what one BIP39 word does, so eleven of them land near where six BIP39 words do.
     </p>
 
     <h2>Using it well</h2>

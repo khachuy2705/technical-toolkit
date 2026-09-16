@@ -37,23 +37,22 @@ import { SITE } from "../data/site";
 
     <h2>Wordlists</h2>
     <p>
-      The passphrase generator ships four lists: the BIP39 English list (2,048 words), a 101-word
-      superhero list, and the two EFF diceware lists — 7,776 words for the large one and 1,296 for
-      the short one. BIP39 and the EFF lists are public domain; the superhero list is our own. All
-      four are bundled with the page rather than fetched at runtime, and each is loaded only when
-      you tick it.
+      The passphrase generator ships three lists: the BIP39 English list (2,048 words), the EFF
+      short diceware list (1,296 words), and a 101-word superhero list. BIP39 and the EFF list are
+      public domain; the superhero list is our own. All three are bundled with the page rather than
+      fetched at runtime, and each is loaded only when you tick it.
     </p>
     <p>
       You can draw from several lists at once. Words that appear in more than one are counted only
-      once — the lists overlap heavily, with 870 words shared between BIP39 and the EFF large list
+      once — the lists overlap heavily, with 464 words shared between BIP39 and the EFF short list
       alone. Counting a shared word twice would claim more bits than the pool really holds and
       would make that word twice as likely to be drawn as any other.
     </p>
     <p>
       A short list is not a weak list, it just needs more words. Every word from the superhero list
-      is worth 6.66 bits against the EFF large list&rsquo;s 12.92, so it takes roughly twice as many
-      of them to reach the same strength. The bit count under each result is the number to watch,
-      not the word count.
+      is worth 6.66 bits against BIP39&rsquo;s 11, so it takes nearly twice as many of them to reach
+      the same strength. The bit count under each result is the number to watch, not the word
+      count.
     </p>
 
     <h2>What is stored</h2>

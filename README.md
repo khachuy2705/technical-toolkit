@@ -104,7 +104,7 @@ styles and a handful of inline `style` attributes.
 
 ## Credits
 
-Wordlists: the [EFF diceware lists](https://www.eff.org/dice) (large: 7,776 words; short: 1,296)
-and the [BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
-(2,048 words), all public domain. The 101-word superhero list is the project's own, kept as
+Wordlists: the [EFF short diceware list](https://www.eff.org/dice) (1,296 words) and the
+[BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
+(2,048 words), both public domain. The 101-word superhero list is the project's own, kept as
 `src/lib/wordlists/superhero.txt`. Icon geometry follows [Lucide](https://lucide.dev) (ISC).
