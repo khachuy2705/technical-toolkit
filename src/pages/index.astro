@@ -8,27 +8,23 @@ import { SITE } from "../data/site";
 <BaseLayout title={`${SITE.name} — ${SITE.tagline}`} description={SITE.description} suffix={false}>
   <section class="hero">
     <h1>Small tools that stay on your machine.</h1>
-    <p>
-      {SITE.description} No accounts, no tracking, no build-up of things you typed into someone
-      else&rsquo;s server.
-    </p>
+    <p>Everything runs in your browser. No accounts, no tracking, nothing sent anywhere.</p>
   </section>
 
-  <h2 class="section-label">Available now</h2>
-  <ul class="tool-grid">
+  <ul class="tool-grid tool-grid--primary">
     {LIVE_TOOLS.map((tool) => <ToolCard tool={tool} />)}
   </ul>
 
   {
     PLANNED_TOOLS.length > 0 && (
-      <>
+      <section class="upcoming">
         <h2 class="section-label">On the way</h2>
-        <ul class="tool-grid">
+        <ul class="tool-grid tool-grid--secondary">
           {PLANNED_TOOLS.map((tool) => (
             <ToolCard tool={tool} />
           ))}
         </ul>
-      </>
+      </section>
     )
   }
 </BaseLayout>

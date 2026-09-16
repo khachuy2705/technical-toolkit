@@ -312,19 +312,21 @@ main {
 
 /* --------------------------------------------------------------------------- Home */
 
+/* The home page sells the tools, not the pitch: the intro stays to two compact
+   lines so the first card is visible without scrolling on a laptop. */
 .hero {
-  max-width: 44rem;
-  margin-bottom: clamp(2rem, 5vw, 3rem);
+  max-width: 42rem;
+  margin-bottom: clamp(1.25rem, 3vw, 1.75rem);
 }
 
 .hero h1 {
-  font-size: clamp(1.9rem, 5vw, 2.75rem);
-  margin-bottom: 0.75rem;
+  font-size: clamp(1.25rem, 2.8vw, 1.6rem);
+  margin-bottom: 0.2rem;
 }
 
 .hero p {
   color: var(--text-muted);
-  font-size: clamp(1rem, 2vw, 1.125rem);
+  font-size: 0.9rem;
 }
 
 .section-label {
@@ -350,9 +352,68 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
   gap: 0.875rem;
-  margin: 0 0 2.5rem;
+  margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Shipped tools carry the page: wider cards, a larger mark, room to breathe. */
+.tool-grid--primary {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  gap: 1rem;
+}
+
+.tool-grid--primary .tool-card {
+  padding: 1.35rem;
+  gap: 0.55rem;
+}
+
+.tool-grid--primary .tool-card__icon {
+  width: 26px;
+  height: 26px;
+  margin-bottom: 0.3rem;
+}
+
+.tool-grid--primary .tool-card__name {
+  font-size: 1.0625rem;
+}
+
+/* Planned tools are a roadmap, not an offer — denser, quieter, further down. */
+.upcoming {
+  margin-top: clamp(2.25rem, 5vw, 3.25rem);
+}
+
+.tool-grid--secondary {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 13.5rem), 1fr));
+  gap: 0.625rem;
+}
+
+.tool-grid--secondary .tool-card {
+  padding: 0.8rem 0.9rem;
+  gap: 0.3rem;
+}
+
+.tool-grid--secondary .tool-card__icon {
+  width: 18px;
+  height: 18px;
+  margin-bottom: 0;
+}
+
+.tool-grid--secondary .tool-card__name {
+  font-size: 0.9rem;
+}
+
+.tool-grid--secondary .tool-card__tagline {
+  font-size: 0.8125rem;
+}
+
+/* Kept rather than hidden: the dashed border reads as "not ready" only if you
+   already know the convention, and `display: none` would drop the cue from the
+   accessibility tree too. */
+.tool-grid--secondary .badge {
+  margin-top: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.65rem;
 }
 
 .tool-card {
