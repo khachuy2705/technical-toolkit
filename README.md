@@ -4,7 +4,8 @@ A static site collecting small developer and security tools. Everything runs cli
 there is no backend, no database, and no network request after the page loads.
 
 Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
-**hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**.
+**hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**,
+**subnet calculator**.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -61,6 +62,7 @@ src/
 │   ├── passphrase.ts    generatePassphrase + wordlist metadata
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
+│   ├── ipv4.ts          Address parsing and subnet arithmetic
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
 │   ├── hash.ts          MD5 + SHA-256/512 over bytes

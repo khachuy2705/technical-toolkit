@@ -34,7 +34,7 @@ unconditional.
 |---|---|---|
 | Framework | Astro 7, `output: 'static'` | Ships zero JS by default. Component reuse at build time, plain HTML at runtime. |
 | Language | TypeScript, `strict` | The generators are the kind of code where an off-by-one is a security bug. |
-| Styling | Hand-written CSS, custom properties | ~1200 lines total. A utility framework would ship more bytes than the entire site. |
+| Styling | Hand-written CSS, custom properties | ~1300 lines total. A utility framework would ship more bytes than the entire site. |
 | Client JS | Vanilla ES modules | Forms, meters and two textareas. A UI framework would be the single largest asset on the page. |
 | Hosting | Vercel, static output | No adapter, no serverless function, no runtime. |
 | Verification | `scripts/verify.ts` in Node | See §9. |
@@ -68,6 +68,7 @@ src/
 │   ├── password.ts        generatePassword + option validation
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
+│   ├── ipv4.ts            Address parsing and subnet arithmetic
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -108,13 +109,14 @@ src/
 │       ├── base64.astro
 │       ├── hash-generator.astro
 │       ├── json-formatter.astro
-│       └── yaml-formatter.astro
+│       ├── yaml-formatter.astro
+│       └── subnet-calculator.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 1447 lines of logic in `lib/`, 575 of components and layouts, 1522 of pages, 1240 of
-CSS, 594 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 1678 lines of logic in `lib/`, 582 of components and layouts, 1795 of pages, 1343 of
+CSS, 713 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -307,7 +309,34 @@ Nothing else needs editing. The home page, nav, sitemap and cross-links pick it 
   JSON yields an array.
 - js-yaml is imported on demand and cached, so the parser is fetched once, only on this page.
 
-### 6.7 Shared tool chrome
+### 6.7 Subnet calculator — `/tools/subnet-calculator/`
+
+One text field, everything derived from it as you type. Accepts `10.0.0.1/24`,
+`10.0.0.1/255.255.255.0`, a space instead of the slash, or a bare address (taken as `/32`, and the
+page says so rather than silently assuming).
+
+The four values the tool was asked for — CIDR prefix, subnet mask, network address, first usable
+host — lead and carry the accent colour. Broadcast, last usable host, usable and total counts,
+wildcard mask and address type follow, because a subnet calculator missing them is half a tool.
+
+Three details that separate a correct calculator from a plausible one:
+
+- **`>>> 0` on every bitwise result.** JavaScript's bitwise operators work on signed int32, so
+  every address from 128.0.0.0 up comes back negative without it. A check pins `255.255.255.255`
+  at 4294967295.
+- **/31 and /32 are special-cased.** RFC 3021 made both addresses of a /31 usable — point-to-point
+  links need two, and spending a /30 on them wasted half the space — and a /32 is a single host.
+  The usual "total minus network and broadcast" gives 0 and −1 usable hosts for these, which is
+  what calculators that skip the special case report.
+- **Leading zeros are refused, not guessed.** `010.0.0.1` is octal 8 to `inet_aton` and decimal 10
+  to others, and that disagreement is a well-worn allow-list bypass. Non-contiguous masks
+  (`255.255.0.255`) are refused for the same reason: a plausible-looking answer would be worse
+  than an error.
+
+Address classification covers RFC 1918 private space, loopback, link-local, CGNAT, the three
+documentation ranges, multicast, reserved and limited broadcast, matched most-specific-first.
+
+### 6.8 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
 `IoPanel` and `lib/textio.ts`:
@@ -338,7 +367,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.8 Site-wide
+### 6.9 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
@@ -454,7 +483,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 145 checks, Node, no browser
+npm run verify   # 190 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -486,6 +515,10 @@ npm run build    # runs check first, then the static build
 - **YAML** — all three modes, indent and sort options, multi-document streams, error location, and
   two documented behaviours asserted so they cannot drift: comments are dropped by reformatting,
   and unquoted `NO` stays a string under the 1.2 core schema.
+- **IPv4** — parsing and rejection (malformed octets, leading zeros, non-contiguous masks), every
+  prefix round-tripping through its mask, five worked networks checked field by field, the /31 and
+  /32 special cases, that usable hosts never go negative at any prefix, that high addresses stay
+  unsigned, and eleven address-type classifications.
 - **Merging** — that the union drops duplicates, equals sum minus overlap, loses no source word,
   invents none, is order-stable across calls, and is unchanged by passing a list twice. BIP39 is
   additionally checked for its defining property: 2,048 words unique in their first four letters.
@@ -574,5 +607,7 @@ Honest list, in rough order of how much they matter:
    such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
    word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
    test before it was understood.
-10. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
+10. **The subnet calculator is IPv4 only.** Subnet masks, broadcast addresses and the /31 rule
+    are IPv4 concepts; IPv6 needs a different presentation rather than a wider parser.
+11. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
     behind them.

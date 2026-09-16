@@ -967,6 +967,109 @@ select {
   display: none;
 }
 
+/* --------------------------------------------------------------------------- Fact grid */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+
+/* The four values the tool exists to produce carry the accent; the rest are
+   supporting detail and should not compete with them. */
+.fact--primary {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.fact--wide {
+  grid-column: 1 / -1;
+}
+
+.fact__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fact__label {
+  margin-right: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.fact--primary .fact__label {
+  color: var(--accent);
+}
+
+.fact__value {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.fact__value[data-empty="true"] {
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.fact__note {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  line-height: 1.45;
+}
+
+.fact__binary {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: -0.01em;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+.big-input {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: clamp(0.95rem, 2.2vw, 1.15rem);
+}
+
+.big-input::placeholder {
+  color: var(--text-faint);
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
 /* --------------------------------------------------------------------------- Hash rows */
 
 .hash-list {

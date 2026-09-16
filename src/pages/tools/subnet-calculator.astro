@@ -1,0 +1,267 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+
+/**
+ * The four the tool was asked for come first and carry the accent; the rest is
+ * the supporting detail any subnet calculation needs to be useful.
+ */
+const FACTS = [
+  { id: "prefix", label: "CIDR prefix", primary: true },
+  { id: "mask", label: "Subnet mask", primary: true },
+  { id: "network", label: "Network address", primary: true },
+  { id: "first-host", label: "First usable host", primary: true },
+  { id: "last-host", label: "Last usable host", primary: false },
+  { id: "broadcast", label: "Broadcast address", primary: false },
+  { id: "usable", label: "Usable hosts", primary: false },
+  { id: "total", label: "Total addresses", primary: false },
+  { id: "wildcard", label: "Wildcard mask", primary: false },
+  { id: "kind", label: "Address type", primary: false },
+] as const;
+
+const PRESETS = ["192.168.1.10/24", "10.0.0.0/8", "172.16.5.3/30", "203.0.113.7/31", "10.1.2.3/32"];
+---
+
+<ToolLayout slug="subnet-calculator">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="cidr">Address and prefix</label>
+      <span class="io__meta" id="input-meta"></span>
+    </div>
+
+    <input
+      type="text"
+      id="cidr"
+      class="big-input"
+      value="192.168.1.10/24"
+      placeholder="192.168.1.10/24"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      inputmode="text"
+    />
+
+    <p class="field__hint" style="margin-top:0.5rem">
+      Also accepts <code>10.0.0.1/255.255.255.0</code>, a space instead of the slash, or a bare
+      address (treated as <code>/32</code>).
+    </p>
+
+    <div class="preset-row">
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+    </div>
+  </section>
+
+  <p class="output__error" id="cidr-error" role="alert" hidden></p>
+
+  <ul class="facts" id="facts">
+    {
+      FACTS.map((fact) => (
+        <li class:list={["fact", fact.primary && "fact--primary"]}>
+          <div class="fact__head">
+            <span class="fact__label">{fact.label}</span>
+            <button
+              type="button"
+              class="btn btn--tiny"
+              data-copy={fact.id}
+              aria-label={`Copy the ${fact.label.toLowerCase()}`}
+            >
+              <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              <span data-label>Copy</span>
+            </button>
+          </div>
+          <span class="fact__value" data-value={fact.id} data-empty="true">
+            &mdash;
+          </span>
+          <span class="fact__note" data-note={fact.id}></span>
+        </li>
+      ))
+    }
+
+    <li class="fact fact--wide">
+      <div class="fact__head">
+        <span class="fact__label">Usable range</span>
+        <button type="button" class="btn btn--tiny" data-copy="range" aria-label="Copy the usable range">
+          <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+          <span data-label>Copy</span>
+        </button>
+      </div>
+      <span class="fact__value" data-value="range" data-empty="true">&mdash;</span>
+      <span class="fact__binary" data-value="binary"></span>
+    </li>
+  </ul>
+
+  <section class="card prose">
+    <h2>Where the two lost addresses go</h2>
+    <p>
+      A /24 holds 256 addresses but only 254 usable hosts. The first is the network address, which
+      names the subnet itself, and the last is the broadcast address, which reaches every host on
+      it. Neither can be assigned to a machine.
+    </p>
+
+    <h2>/31 and /32 break that rule, on purpose</h2>
+    <p>
+      A <code>/31</code> has no network or broadcast address at all. RFC 3021 made both of its two
+      addresses usable, because point-to-point links between routers only ever need two and burning
+      a /30 on them wasted half the space. A <code>/32</code> is a single host — a loopback
+      interface, a route to one machine, a firewall rule.
+    </p>
+    <p>
+      Calculators that apply &ldquo;minus two&rdquo; blindly report 0 and &minus;1 usable hosts for
+      these. This one special-cases both.
+    </p>
+
+    <h2>Leading zeros are refused</h2>
+    <p>
+      <code>010.0.0.1</code> gets no answer here. Some parsers read <code>010</code> as octal 8 and
+      others as decimal 10, and that disagreement is a well-worn way to slip an address past an
+      allow-list. Guessing which one you meant would be the wrong thing to do, so it asks you to
+      write it unambiguously.
+    </p>
+
+    <h2>The mask has to be contiguous</h2>
+    <p>
+      <code>255.255.0.255</code> is a well-formed dotted quad and not a valid subnet mask: the 1
+      bits must be one unbroken run from the left. Entering one gets you an error rather than a
+      nonsensical prefix length.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    classifyAddress,
+    describeNetwork,
+    formatIpv4,
+    parseCidr,
+    toBinary,
+  } from "../../lib/ipv4";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-subnet";
+
+  const input = el<HTMLInputElement>("#cidr");
+  const errorBox = el<HTMLParagraphElement>("#cidr-error");
+  const inputMeta = el<HTMLElement>("#input-meta");
+
+  const values = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-value]").map((node) => [node.dataset["value"]!, node]),
+  );
+  const notes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-note]").map((node) => [node.dataset["note"]!, node]),
+  );
+
+  /** Plain strings for the copy buttons, which must not copy an em dash. */
+  let current = new Map<string, string>();
+
+  const saved = loadPrefs(PREFS_KEY, { cidr: "" }).cidr;
+  if (typeof saved === "string" && saved.length > 0) input.value = saved;
+
+  function set(id: string, value: string, note = ""): void {
+    current.set(id, value);
+    const node = values.get(id);
+    if (node) {
+      node.textContent = value;
+      delete node.dataset["empty"];
+    }
+    const noteNode = notes.get(id);
+    if (noteNode) noteNode.textContent = note;
+  }
+
+  function clear(): void {
+    current = new Map();
+    for (const node of values.values()) {
+      node.textContent = "—";
+      node.dataset["empty"] = "true";
+    }
+    for (const node of notes.values()) node.textContent = "";
+  }
+
+  function run(): void {
+    savePrefs(PREFS_KEY, { cidr: input.value });
+
+    if (input.value.trim().length === 0) {
+      errorBox.hidden = true;
+      inputMeta.textContent = "";
+      clear();
+      return;
+    }
+
+    let parsed: ReturnType<typeof parseCidr>;
+    try {
+      parsed = parseCidr(input.value);
+    } catch (error) {
+      errorBox.textContent = error instanceof Error ? error.message : String(error);
+      errorBox.hidden = false;
+      inputMeta.textContent = "";
+      clear();
+      return;
+    }
+
+    errorBox.hidden = true;
+    const net = describeNetwork(parsed.address, parsed.prefix);
+    const kind = classifyAddress(net.network);
+
+    inputMeta.textContent = parsed.prefixAssumed
+      ? "no prefix given — assuming /32"
+      : `${formatIpv4(net.address)} in ${formatIpv4(net.network)}/${net.prefix}`;
+
+    set("prefix", `/${net.prefix}`, `${net.prefix} network bits, ${32 - net.prefix} host bits`);
+    set("mask", formatIpv4(net.mask), toBinary(net.mask));
+    set(
+      "network",
+      formatIpv4(net.network),
+      net.prefix === 32 ? "a single address" : "names the subnet; not assignable",
+    );
+
+    if (net.prefix === 32) {
+      set("first-host", formatIpv4(net.firstHost), "the address itself");
+      set("last-host", formatIpv4(net.lastHost), "the address itself");
+      set("broadcast", "none", "/32 has no broadcast address");
+    } else if (net.prefix === 31) {
+      set("first-host", formatIpv4(net.firstHost), "RFC 3021 — both addresses are usable");
+      set("last-host", formatIpv4(net.lastHost), "RFC 3021 — both addresses are usable");
+      set("broadcast", "none", "/31 has no broadcast address");
+    } else {
+      set("first-host", formatIpv4(net.firstHost), "network address + 1");
+      set("last-host", formatIpv4(net.lastHost), "broadcast address − 1");
+      set("broadcast", formatIpv4(net.broadcast), "reaches every host; not assignable");
+    }
+
+    set(
+      "usable",
+      net.usableHosts.toLocaleString("en-US"),
+      net.degenerate ? "no network/broadcast pair to subtract" : "total minus network and broadcast",
+    );
+    set("total", net.totalAddresses.toLocaleString("en-US"), `2^${32 - net.prefix}`);
+    set("wildcard", formatIpv4(net.wildcard), "the mask inverted, as ACLs want it");
+    set("kind", kind.label, kind.note);
+
+    set(
+      "range",
+      net.usableHosts === 1
+        ? formatIpv4(net.firstHost)
+        : `${formatIpv4(net.firstHost)} – ${formatIpv4(net.lastHost)}`,
+    );
+    const binary = values.get("binary");
+    if (binary) binary.textContent = `${toBinary(net.network)}  /${net.prefix}`;
+  }
+
+  input.addEventListener("input", run);
+
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      input.value = button.dataset["preset"]!;
+      input.focus();
+      run();
+    });
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-copy]")) {
+    const id = button.dataset["copy"]!;
+    attachCopy(button, () => current.get(id) ?? "");
+  }
+
+  run();
+</script>

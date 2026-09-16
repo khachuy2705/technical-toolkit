@@ -10,6 +10,16 @@ import { md5 } from "../src/lib/md5";
 import { findErrorIndex, formatJson } from "../src/lib/jsonfmt";
 import { convertYaml } from "../src/lib/yamlfmt";
 import { lineColumn, sortKeysDeep } from "../src/lib/format";
+import {
+  classifyAddress,
+  describeNetwork,
+  formatIpv4,
+  maskFromPrefix,
+  parseCidr,
+  parseIpv4,
+  prefixFromMask,
+  toBinary,
+} from "../src/lib/ipv4";
 
 export type Check = (name: string, condition: boolean, detail?: string) => void;
 
@@ -203,6 +213,115 @@ export async function runToolChecks(check: Check): Promise<void> {
     check("sortKeysDeep leaves primitives", sortKeysDeep(5) === 5 && sortKeysDeep(null) === null);
   }
 
+  console.log("\n-- ipv4 --");
+  {
+    check("formats an address", formatIpv4(0xc0a8010a) === "192.168.1.10");
+    check("formats the top of the space", formatIpv4(0xffffffff) === "255.255.255.255");
+    check("round-trips every octet boundary", ["0.0.0.0", "1.2.3.4", "128.0.0.1", "255.255.255.255"].every((a) => formatIpv4(parseIpv4(a)) === a));
+
+    // Addresses at or above 128.0.0.0 have the top bit set, which JavaScript's
+    // signed bitwise operators turn negative without an explicit >>> 0.
+    check("high addresses stay unsigned", parseIpv4("255.255.255.255") === 4294967295, String(parseIpv4("255.255.255.255")));
+    check("network of a high address is unsigned", describeNetwork(parseIpv4("240.1.2.3"), 8).network === parseIpv4("240.0.0.0"));
+
+    const BAD = ["256.1.1.1", "1.2.3", "1.2.3.4.5", "1.2.3.a", "", "1.2.3.-1", "01.2.3.4", "1.02.3.4"];
+    let rejected = 0;
+    for (const bad of BAD) {
+      try { parseIpv4(bad); } catch { rejected += 1; }
+    }
+    check("rejects malformed addresses", rejected === BAD.length, rejected + "/" + BAD.length);
+
+    // Leading zeros are octal to some parsers and decimal to others; refusing
+    // them is the only reading that cannot be wrong.
+    let octalRefused = false;
+    try { parseIpv4("010.0.0.1"); } catch (error) {
+      octalRefused = error instanceof Error && error.message.includes("leading zero");
+    }
+    check("refuses leading zeros by name", octalRefused);
+
+    check("mask for /24", formatIpv4(maskFromPrefix(24)) === "255.255.255.0");
+    check("mask for /0 is all zeros", maskFromPrefix(0) === 0, String(maskFromPrefix(0)));
+    check("mask for /32 is all ones", maskFromPrefix(32) === 4294967295, String(maskFromPrefix(32)));
+    check(
+      "every prefix round-trips through its mask",
+      Array.from({ length: 33 }, (_, i) => i).every((p) => prefixFromMask(maskFromPrefix(p)) === p),
+    );
+
+    let gappy = false;
+    try { prefixFromMask(parseIpv4("255.255.0.255")); } catch { gappy = true; }
+    check("rejects a non-contiguous mask", gappy);
+
+    const NETWORKS: readonly [string, number, string, string, string, string, number][] = [
+      ["192.168.1.10/24", 24, "255.255.255.0", "192.168.1.0", "192.168.1.1", "192.168.1.254", 254],
+      ["10.0.0.0/8", 8, "255.0.0.0", "10.0.0.0", "10.0.0.1", "10.255.255.254", 16777214],
+      ["172.16.5.3/30", 30, "255.255.255.252", "172.16.5.0", "172.16.5.1", "172.16.5.2", 2],
+      ["192.168.1.130/26", 26, "255.255.255.192", "192.168.1.128", "192.168.1.129", "192.168.1.190", 62],
+      ["0.0.0.0/0", 0, "0.0.0.0", "0.0.0.0", "0.0.0.1", "255.255.255.254", 4294967294],
+    ];
+    for (const [text, prefix, mask, network, first, last, usable] of NETWORKS) {
+      const parsed = parseCidr(text);
+      const net = describeNetwork(parsed.address, parsed.prefix);
+      const actual = [parsed.prefix, formatIpv4(net.mask), formatIpv4(net.network), formatIpv4(net.firstHost), formatIpv4(net.lastHost), net.usableHosts];
+      const expected = [prefix, mask, network, first, last, usable];
+      check(text + " resolves correctly", actual.join("|") === expected.join("|"), actual.join(" ") + " vs " + expected.join(" "));
+    }
+
+    check("broadcast of a /24", formatIpv4(describeNetwork(parseIpv4("192.168.1.10"), 24).broadcast) === "192.168.1.255");
+    check("wildcard of a /24", formatIpv4(describeNetwork(parseIpv4("192.168.1.10"), 24).wildcard) === "0.0.0.255");
+    check("host bits are cleared", formatIpv4(describeNetwork(parseIpv4("192.168.1.200"), 24).network) === "192.168.1.0");
+
+    // RFC 3021: a /31 has two usable addresses and no broadcast. A naive
+    // "total minus two" reports 0 here and -1 for a /32.
+    const p31 = describeNetwork(parseIpv4("203.0.113.6"), 31);
+    check("/31 has 2 usable hosts", p31.usableHosts === 2, String(p31.usableHosts));
+    check("/31 hosts are both addresses", formatIpv4(p31.firstHost) === "203.0.113.6" && formatIpv4(p31.lastHost) === "203.0.113.7", formatIpv4(p31.firstHost) + "-" + formatIpv4(p31.lastHost));
+
+    const p32 = describeNetwork(parseIpv4("10.1.2.3"), 32);
+    check("/32 has 1 usable host", p32.usableHosts === 1, String(p32.usableHosts));
+    check("/32 first and last are the address", formatIpv4(p32.firstHost) === "10.1.2.3" && formatIpv4(p32.lastHost) === "10.1.2.3");
+    check("/31 and /32 are flagged degenerate", p31.degenerate && p32.degenerate);
+    check("/30 is not degenerate", !describeNetwork(parseIpv4("10.0.0.0"), 30).degenerate);
+
+    check(
+      "usable hosts never go negative",
+      Array.from({ length: 33 }, (_, i) => i).every((p) => describeNetwork(parseIpv4("10.20.30.40"), p).usableHosts >= 1),
+    );
+    check(
+      "total addresses double as the prefix shrinks",
+      Array.from({ length: 33 }, (_, i) => i).every((p) => describeNetwork(0, p).totalAddresses === 2 ** (32 - p)),
+    );
+
+    check("accepts a dotted mask", parseCidr("10.0.0.1/255.255.255.0").prefix === 24);
+    check("accepts a space separator", parseCidr("10.0.0.1 255.255.128.0").prefix === 17);
+    check("a bare address is /32 and says so", (() => { const r = parseCidr("10.0.0.1"); return r.prefix === 32 && r.prefixAssumed; })());
+    check("a written prefix is not marked assumed", !parseCidr("10.0.0.1/24").prefixAssumed);
+
+    const BAD_PREFIXES = ["1.2.3.4/33", "1.2.3.4/", "1.2.3.4/abc", "1.2.3.4/-1", "1.2.3.4/255.255.0.255"];
+    let badPrefixes = 0;
+    for (const bad of BAD_PREFIXES) {
+      try { parseCidr(bad); } catch { badPrefixes += 1; }
+    }
+    check("rejects bad prefixes", badPrefixes === BAD_PREFIXES.length, badPrefixes + "/" + BAD_PREFIXES.length);
+
+    const KINDS: readonly [string, string][] = [
+      ["10.1.2.3", "Private"],
+      ["172.16.0.1", "Private"],
+      ["172.32.0.1", "Public"],
+      ["192.168.0.1", "Private"],
+      ["127.0.0.1", "Loopback"],
+      ["169.254.1.1", "Link-local"],
+      ["100.64.0.1", "Carrier-grade NAT"],
+      ["203.0.113.1", "Documentation"],
+      ["224.0.0.1", "Multicast"],
+      ["8.8.8.8", "Public"],
+      ["255.255.255.255", "Limited broadcast"],
+    ];
+    for (const [address, label] of KINDS) {
+      check(address + " is " + label, classifyAddress(parseIpv4(address)).label === label, classifyAddress(parseIpv4(address)).label);
+    }
+
+    check("binary view groups by octet", toBinary(parseIpv4("192.168.1.0")) === "11000000.10101000.00000001.00000000", toBinary(parseIpv4("192.168.1.0")));
+  }
   console.log("\n-- yaml --");
   {
     const tidy = await convertYaml("b:   1\na:\n  - 2\n", { mode: "format", indent: 2, sortKeys: false });

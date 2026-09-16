@@ -53,6 +53,16 @@ export const TOOLS: readonly Tool[] = [
     status: 'live',
   },
   {
+    slug: 'subnet-calculator',
+    name: 'Subnet Calculator',
+    tagline: 'Type an IP and prefix, get the whole network.',
+    description:
+      'Work out the subnet mask, network and broadcast address, usable host range and host count for any IPv4 network. Type an address with a prefix and everything updates as you go.',
+    keywords: ['subnet calculator', 'cidr calculator', 'ipv4 subnet', 'netmask', 'network address'],
+    icon: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
+    status: 'live',
+  },
+  {
     slug: 'uuid-generator',
     name: 'UUID Generator',
     tagline: 'v4 and v7 identifiers, in bulk.',
