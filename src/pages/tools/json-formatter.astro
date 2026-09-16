@@ -1,0 +1,126 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+---
+
+<ToolLayout slug="json-formatter">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <span class="field__label">Output</span>
+        <div class="segmented" role="radiogroup" aria-label="Output style">
+          <label>
+            <input type="radio" name="style" value="pretty" checked />
+            <span>Pretty</span>
+          </label>
+          <label>
+            <input type="radio" name="style" value="minify" />
+            <span>Minify</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="indent">Indent</label>
+        <select id="indent">
+          <option value="2">2 spaces</option>
+          <option value="4">4 spaces</option>
+          <option value="tab">Tab</option>
+        </select>
+        <p class="field__hint" id="indent-hint">Ignored while minifying.</p>
+      </div>
+
+      <fieldset class="field" style="border:0;margin:0;padding:0;min-inline-size:0">
+        <legend class="field__label" style="padding:0">Keys</legend>
+        <label class="check">
+          <input type="checkbox" id="sort-keys" />
+          <span class="check__text">
+            Sort object keys
+            <span class="check__sample">recursive; array order is never touched</span>
+          </span>
+        </label>
+      </fieldset>
+    </div>
+  </section>
+
+  <IoPanel inputLabel="JSON in" outputLabel="JSON out" placeholder="Paste JSON here…" swappable />
+
+  <section class="card prose">
+    <h2>Errors name the line</h2>
+    <p>
+      Engines report a parse failure as a character offset — &ldquo;position 412&rdquo; — which is
+      useless against a 2,000-character payload. The offset is converted to a line and column here
+      so you can go straight to the problem.
+    </p>
+
+    <h2>Sorting keys is safe; sorting arrays is not</h2>
+    <p>
+      Sort object keys to make two documents comparable with a plain diff. Arrays keep their order
+      always: in JSON an array&rsquo;s order <em>is</em> data, so reordering it would change the
+      document rather than reformat it.
+    </p>
+
+    <h2>What the parser accepts</h2>
+    <p>
+      Strict JSON, as <code>JSON.parse</code> defines it. No comments, no trailing commas, no
+      unquoted keys, no single quotes. If your file has those it is JSON5 or JSONC, and this tool
+      will point at the first one it meets rather than silently accepting it.
+    </p>
+    <p>
+      One thing worth knowing: numbers round-trip through JavaScript doubles. An integer beyond
+      2^53 — a Twitter-style ID, a large database key — loses precision on the way through. That is
+      a property of JSON in JavaScript, not of this page, but it is the reason a formatted
+      <code>12345678901234567890</code> comes back slightly different.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import { formatJson } from "../../lib/jsonfmt";
+  import type { Indent } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-json";
+
+  const styleRadios = all<HTMLInputElement>('input[name="style"]');
+  const indentSelect = el<HTMLSelectElement>("#indent");
+  const indentHint = el<HTMLElement>("#indent-hint");
+  const sortKeys = el<HTMLInputElement>("#sort-keys");
+
+  const DEFAULTS = { style: "pretty", indent: "2", sortKeys: false };
+
+  const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+  for (const radio of styleRadios) radio.checked = radio.value === prefs.style;
+  if (!styleRadios.some((r) => r.checked)) styleRadios[0]!.checked = true;
+  if ([...indentSelect.options].some((o) => o.value === prefs.indent)) {
+    indentSelect.value = prefs.indent;
+  }
+  sortKeys.checked = Boolean(prefs.sortKeys);
+
+  const minifying = () => styleRadios.find((r) => r.checked)?.value === "minify";
+  const indentOf = (): Indent =>
+    indentSelect.value === "tab" ? "tab" : (Number(indentSelect.value) as 2 | 4);
+
+  const SAMPLE = '{"name":"technical-toolkit","tags":["static","private"],"build":{"minify":true,"target":"es2022"},"version":3}';
+
+  const io = attachTextIo({
+    downloadName: "formatted.json",
+    sample: SAMPLE,
+    transform(input) {
+      const minify = minifying();
+      savePrefs(PREFS_KEY, {
+        style: minify ? "minify" : "pretty",
+        indent: indentSelect.value,
+        sortKeys: sortKeys.checked,
+      });
+      indentSelect.disabled = minify;
+      indentHint.hidden = !minify;
+      return formatJson(input, { indent: indentOf(), minify, sortKeys: sortKeys.checked });
+    },
+  });
+
+  for (const control of [...styleRadios, indentSelect, sortKeys]) {
+    control.addEventListener("change", io.run);
+  }
+</script>

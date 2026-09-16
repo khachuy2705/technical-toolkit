@@ -829,6 +829,232 @@ select {
   opacity: 0.5;
 }
 
+/* A two-state control the user flips constantly (encode/decode) earns a
+   segmented button rather than a select, which would cost two clicks. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.segmented input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented span {
+  display: block;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.segmented label + label span {
+  border-left: 1px solid var(--border);
+}
+
+.segmented span:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.segmented input:checked + span {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.segmented input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --------------------------------------------------------------------------- Text I/O */
+
+/* Side by side once there is room; stacked on a phone, where a half-width
+   textarea is useless for anything but the shortest input. */
+.io {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.875rem;
+}
+
+@media (min-width: 820px) {
+  .io {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.io__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.io__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 28px;
+}
+
+.io__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.io__meta {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.io__text {
+  width: 100%;
+  min-height: 15rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  tab-size: 2;
+  resize: vertical;
+  /* Long Base64 and hex runs must wrap rather than scroll the pane sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.io__text:read-only {
+  background: var(--bg-subtle);
+}
+
+.io__text::placeholder {
+  color: var(--text-faint);
+}
+
+.io__error {
+  margin-top: 0;
+}
+
+.io__error[hidden] {
+  display: none;
+}
+
+.btn--tiny {
+  padding: 0.22rem 0.5rem;
+  font-size: 0.75rem;
+  gap: 0.3rem;
+}
+
+.btn--tiny[hidden] {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------- Hash rows */
+
+.hash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.hash-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.hash-row__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hash-row__name {
+  font-weight: 650;
+  font-size: 0.85rem;
+}
+
+.hash-row__note {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.hash-row--weak .hash-row__note {
+  color: var(--strength-1);
+}
+
+.hash-row__value {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  user-select: all;
+  color: var(--text);
+}
+
+.hash-row__value[data-empty="true"] {
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.file-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.file-field input[type="file"] {
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  max-width: 100%;
+}
+
+.file-field input[type="file"]::file-selector-button {
+  margin-right: 0.6rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
 /* --------------------------------------------------------------------------- Bulk list */
 
 .bulk__head {

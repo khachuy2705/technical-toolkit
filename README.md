@@ -3,7 +3,8 @@
 A static site collecting small developer and security tools. Everything runs client-side —
 there is no backend, no database, and no network request after the page loads.
 
-Live tools: **password generator**, **passphrase generator**.
+Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
+**hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -18,8 +19,9 @@ and the security decisions. Read it before adding a tool.
 | Client JS | Vanilla ES modules, bundled per page by Astro |
 | Hosting | Vercel (static output, no adapter needed) |
 
-No runtime dependencies ship to the browser. Total JS for a tool page is a few kilobytes plus
-the wordlist chunk, which only the passphrase page loads.
+One runtime dependency: `js-yaml`, dynamically imported so only the YAML page downloads it. Every
+other tool is written from scratch. A tool page is a few kilobytes of JavaScript; the heavy pieces
+— wordlists, the YAML parser — are separate chunks fetched only when the feature is used.
 
 ## Commands
 
@@ -59,8 +61,16 @@ src/
 │   ├── passphrase.ts    generatePassphrase + wordlist metadata
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
+│   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
+│   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
+│   ├── hash.ts          MD5 + SHA-256/512 over bytes
+│   ├── jsonfmt.ts       Format/minify/sort, with an engine-independent
+│   │                    error locator
+│   ├── yamlfmt.ts       Tidy YAML and convert to/from JSON (lazy js-yaml)
+│   ├── format.ts        Shared result type, line/column, deep key sort
 │   ├── ui.ts            DOM helpers used by the tool page scripts
-│   └── wordlists/       Superhero + EFF lists, loaded via dynamic import
+│   ├── textio.ts        Wiring for the two-pane text tools
+│   └── wordlists/       BIP39, superhero and EFF short, via dynamic import
 ├── layouts/             BaseLayout (head/SEO/theme) and ToolLayout
 ├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel…
 ├── pages/

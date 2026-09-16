@@ -1,0 +1,115 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+---
+
+<ToolLayout slug="base64">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <span class="field__label">Direction</span>
+        <div class="segmented" role="radiogroup" aria-label="Direction">
+          <label>
+            <input type="radio" name="mode" value="encode" checked />
+            <span>Encode</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="decode" />
+            <span>Decode</span>
+          </label>
+        </div>
+      </div>
+
+      <fieldset class="field" style="border:0;margin:0;padding:0;min-inline-size:0">
+        <legend class="field__label" style="padding:0">Alphabet</legend>
+        <label class="check">
+          <input type="checkbox" id="url-safe" />
+          <span class="check__text">
+            URL-safe (base64url)
+            <span class="check__sample">- and _ instead of + and /, padding dropped</span>
+          </span>
+        </label>
+        <p class="field__hint">
+          Decoding accepts either alphabet regardless of this setting, along with line wrapping
+          and missing padding.
+        </p>
+      </fieldset>
+    </div>
+  </section>
+
+  <IoPanel placeholder="Paste text or Base64 here…" swappable />
+
+  <section class="card prose">
+    <h2>Why not just use btoa?</h2>
+    <p>
+      Because <code>btoa</code> is Latin-1 only. <code>btoa("café")</code> throws, and anything you
+      do manage to push through it round-trips wrong above U+00FF. This tool runs the text through
+      <code>TextEncoder</code> first, so emoji, Vietnamese, Arabic and CJK all survive intact.
+    </p>
+
+    <h2>Decoding is deliberately forgiving</h2>
+    <p>
+      Base64 arrives in the wild wrapped at 76 columns, stripped of its padding, or in URL-safe
+      form. Rejecting those would make the tool useless, so whitespace is dropped, both alphabets
+      are accepted and padding is restored before decoding. What is <em>not</em> forgiven: a
+      character outside the alphabet, or a length that cannot form complete groups — both are
+      reported rather than quietly worked around.
+    </p>
+
+    <h2>Binary input</h2>
+    <p>
+      If the decoded bytes are not valid UTF-8 you get an error instead of a string full of
+      replacement characters. That usually means the payload is an image, a key, or some other
+      binary blob rather than text — the decoder is telling you the truth rather than guessing.
+    </p>
+
+    <h2>Base64 is not encryption</h2>
+    <p>
+      It is an encoding: reversible by anyone, with no key involved. It exists so binary data can
+      travel through channels that only accept text. Never use it to hide anything.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import { decodeBase64, encodeBase64, type Base64Variant } from "../../lib/base64";
+  import { fail, ok, type FormatResult } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-base64";
+
+  const modeRadios = all<HTMLInputElement>('input[name="mode"]');
+  const urlSafe = el<HTMLInputElement>("#url-safe");
+
+  const DEFAULTS = { mode: "encode", urlSafe: false };
+
+  const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+  for (const radio of modeRadios) radio.checked = radio.value === prefs.mode;
+  if (!modeRadios.some((r) => r.checked)) modeRadios[0]!.checked = true;
+  urlSafe.checked = Boolean(prefs.urlSafe);
+
+  const currentMode = () => modeRadios.find((r) => r.checked)?.value ?? "encode";
+  const variant = (): Base64Variant => (urlSafe.checked ? "url" : "standard");
+
+  const SAMPLE = "Chào thế giới — Base64 handles this fine. 🎉";
+
+  const io = attachTextIo({
+    downloadName: "base64.txt",
+    sample: SAMPLE,
+    transform(input): FormatResult {
+      savePrefs(PREFS_KEY, { mode: currentMode(), urlSafe: urlSafe.checked });
+      try {
+        return currentMode() === "encode"
+          ? ok(encodeBase64(input, variant()))
+          : ok(decodeBase64(input, variant()));
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+    },
+  });
+
+  for (const control of [...modeRadios, urlSafe]) {
+    control.addEventListener("change", io.run);
+  }
+</script>

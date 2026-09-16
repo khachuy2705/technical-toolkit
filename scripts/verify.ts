@@ -1,3 +1,4 @@
+import { runToolChecks } from "./verify-tools";
 import { randomInt, shuffle, sample } from "../src/lib/random";
 import { CHAR_CLASSES, AMBIGUOUS_CHARS, stripAmbiguous } from "../src/lib/charsets";
 import {
@@ -317,6 +318,9 @@ console.log("\n-- entropy --");
   check("high entropy is finite text", !crackTime(838).includes("NaN") && !crackTime(838).includes("Infinity"));
   check("129.8 bits is astronomically long", crackTime(129.83).includes("year"));
 }
+
+// The text-transform tools live in their own file; this one owns the harness.
+await runToolChecks(check);
 
 console.log("\n-- shipped defaults --");
 {

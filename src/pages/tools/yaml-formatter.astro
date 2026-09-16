@@ -1,0 +1,173 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+import { YAML_MODES } from "../../lib/yamlfmt";
+---
+
+<ToolLayout slug="yaml-formatter">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <label class="field__label" for="mode">Mode</label>
+        <select id="mode">
+          {YAML_MODES.map((mode) => <option value={mode.id}>{mode.label}</option>)}
+        </select>
+        <p class="field__hint" id="mode-hint"></p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="indent">Indent</label>
+        <select id="indent">
+          <option value="2">2 spaces</option>
+          <option value="4">4 spaces</option>
+        </select>
+        <p class="field__hint">YAML forbids tabs for indentation, so only spaces are offered.</p>
+      </div>
+
+      <fieldset class="field" style="border:0;margin:0;padding:0;min-inline-size:0">
+        <legend class="field__label" style="padding:0">Keys</legend>
+        <label class="check">
+          <input type="checkbox" id="sort-keys" />
+          <span class="check__text">
+            Sort mapping keys
+            <span class="check__sample">recursive; sequence order is never touched</span>
+          </span>
+        </label>
+      </fieldset>
+    </div>
+  </section>
+
+  <IoPanel inputLabel="Input" outputLabel="Output" placeholder="Paste YAML here…" swappable />
+
+  <section class="card prose">
+    <h2>Three jobs, one parser</h2>
+    <p>
+      <b>Tidy YAML</b> parses and re-emits, which normalises indentation, quoting and flow style in
+      one pass — and fails loudly if the document is not valid. <b>YAML → JSON</b> and
+      <b>JSON → YAML</b> move the same parsed structure between the two formats.
+    </p>
+
+    <h2>Reformatting is lossy, and you should know how</h2>
+    <p>
+      The document is parsed into data and printed fresh, so anything that lives outside the data
+      does not survive: <b>comments are dropped</b>, blank lines go, and your quoting style is
+      replaced by the emitter&rsquo;s. Anchors and aliases are expanded rather than preserved,
+      because a tidied file full of <code>&amp;ref_0</code> markers surprises anyone who did not
+      write them.
+    </p>
+    <p>
+      If comments matter, tidy a copy — not the file you intend to keep.
+    </p>
+
+    <h2>Multiple documents</h2>
+    <p>
+      A stream separated by <code>---</code> is read in full. Tidy mode re-emits every document;
+      converting to JSON gives an array of them.
+    </p>
+
+    <h2>YAML has sharp edges</h2>
+    <p>
+      Under YAML 1.1 rules, unquoted <code>no</code>, <code>off</code> and <code>yes</code> parse as
+      booleans, and <code>1.0</code> becomes a float — the original &ldquo;Norway problem&rdquo;,
+      where a country code <code>NO</code> turns into <code>false</code>. This tool follows the
+      YAML 1.2 core schema, where those stay strings, but the file you are editing may be read by
+      something older. Quote anything you need to stay text.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import { convertYaml, YAML_MODES, type YamlMode } from "../../lib/yamlfmt";
+  import type { Indent } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-yaml";
+
+  const modeSelect = el<HTMLSelectElement>("#mode");
+  const modeHint = el<HTMLElement>("#mode-hint");
+  const indentSelect = el<HTMLSelectElement>("#indent");
+  const sortKeys = el<HTMLInputElement>("#sort-keys");
+  const inputLabel = el<HTMLLabelElement>('label[for="io-input"]');
+  const outputLabel = el<HTMLLabelElement>('label[for="io-output"]');
+  const inputArea = el<HTMLTextAreaElement>("#io-input");
+
+  const DEFAULTS = { mode: "format", indent: "2", sortKeys: false };
+
+  const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+  if ([...modeSelect.options].some((o) => o.value === prefs.mode)) modeSelect.value = prefs.mode;
+  if ([...indentSelect.options].some((o) => o.value === prefs.indent)) {
+    indentSelect.value = prefs.indent;
+  }
+  sortKeys.checked = Boolean(prefs.sortKeys);
+
+  const currentMode = () => modeSelect.value as YamlMode;
+  const indentOf = (): Indent => (Number(indentSelect.value) === 4 ? 4 : 2);
+
+  const YAML_SAMPLE = `# a deployment, roughly
+name:    technical-toolkit
+replicas: 2
+env:
+    - name: SITE_URL
+      value: "https://example.com"
+features: {static: true, database: false}
+`;
+
+  const JSON_SAMPLE = '{"name":"technical-toolkit","replicas":2,"features":{"static":true,"database":false}}';
+
+  /** Pane labels and the sample follow the direction of travel. */
+  function relabel(): void {
+    const mode = currentMode();
+    modeHint.textContent = YAML_MODES.find((m) => m.id === mode)?.hint ?? "";
+
+    const fromJson = mode === "from-json";
+    inputLabel.textContent = fromJson ? "JSON in" : "YAML in";
+    outputLabel.textContent = mode === "to-json" ? "JSON out" : "YAML out";
+    inputArea.placeholder = fromJson ? "Paste JSON here…" : "Paste YAML here…";
+  }
+
+  const io = attachTextIo({
+    downloadName: "formatted.yaml",
+    sample: YAML_SAMPLE,
+    transform(input) {
+      savePrefs(PREFS_KEY, {
+        mode: modeSelect.value,
+        indent: indentSelect.value,
+        sortKeys: sortKeys.checked,
+      });
+      return convertYaml(input, {
+        mode: currentMode(),
+        indent: indentOf(),
+        sortKeys: sortKeys.checked,
+      });
+    },
+  });
+
+  relabel();
+
+  modeSelect.addEventListener("change", () => {
+    relabel();
+    // The Sample button should hand over something the current mode can parse.
+    const sample = document.getElementById("io-sample");
+    if (sample) sample.dataset["sample"] = currentMode() === "from-json" ? "json" : "yaml";
+    io.run();
+  });
+
+  for (const control of [indentSelect, sortKeys]) {
+    control.addEventListener("change", io.run);
+  }
+
+  // attachTextIo captured one sample string; swap it out when the mode flips so
+  // "Sample" never loads JSON into a YAML parse or the reverse.
+  const sampleButton = document.getElementById("io-sample");
+  if (sampleButton) {
+    sampleButton.addEventListener(
+      "click",
+      () => {
+        inputArea.value = currentMode() === "from-json" ? JSON_SAMPLE : YAML_SAMPLE;
+        io.run();
+      },
+      true,
+    );
+  }
+</script>

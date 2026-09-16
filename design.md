@@ -15,9 +15,10 @@ That is the product. It is also a hard architectural constraint, and almost ever
 follows from it:
 
 - No backend, no database, no API route. The site is a folder of static files.
-- No analytics, no tag manager, no error-reporting SDK, no third-party fonts or assets. The page
-  makes no network request after its own assets have loaded — a claim that is checked at build
-  time (see §9).
+- No analytics, no tag manager, no error-reporting SDK, no third-party fonts or assets. The only
+  requests are for the site's own code, from its own origin — including the chunks fetched on
+  demand (a wordlist, the YAML parser). **No request ever carries user input.** The absence of
+  third-party origins is checked at build time (see §9).
 - All randomness is generated client-side from the browser's CSPRNG.
 - The only thing written to storage is UI preference, never output.
 
@@ -33,13 +34,18 @@ unconditional.
 |---|---|---|
 | Framework | Astro 7, `output: 'static'` | Ships zero JS by default. Component reuse at build time, plain HTML at runtime. |
 | Language | TypeScript, `strict` | The generators are the kind of code where an off-by-one is a security bug. |
-| Styling | Hand-written CSS, custom properties | ~1000 lines total. A utility framework would ship more bytes than the entire site. |
-| Client JS | Vanilla ES modules | Two forms and a meter. A UI framework would be the single largest asset on the page. |
+| Styling | Hand-written CSS, custom properties | ~1200 lines total. A utility framework would ship more bytes than the entire site. |
+| Client JS | Vanilla ES modules | Forms, meters and two textareas. A UI framework would be the single largest asset on the page. |
 | Hosting | Vercel, static output | No adapter, no serverless function, no runtime. |
 | Verification | `scripts/verify.ts` in Node | See §9. |
 
-One runtime dependency (`astro`), and it does not ship to the browser. Dev dependencies are
-`typescript`, `@astrojs/check`, `@types/node`, `esbuild`.
+**One dependency ships to the browser: `js-yaml`.** It is dynamically imported, so only the YAML
+page downloads it, and it is bundled rather than pulled from a CDN. The alternative was writing a
+YAML parser, and a formatter that quietly misreads a document is worse than no formatter — YAML is
+a large specification with genuinely surprising corners. Everything else on this site is written
+from scratch, including MD5, which `crypto.subtle` refuses to implement.
+
+Dev dependencies are `typescript`, `@astrojs/check`, `@types/node`, `esbuild`.
 
 **TypeScript is pinned to `~6.0.3` on purpose.** TypeScript 7's native compiler does not yet expose
 the programmatic API that `astro check` uses, and installing it silently breaks `npm run check`.
@@ -62,8 +68,15 @@ src/
 │   ├── password.ts        generatePassword + option validation
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
+│   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
+│   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
+│   ├── hash.ts            MD5 + SHA-256/512 over bytes
+│   ├── format.ts          Shared result type, line/column, deep key sort
+│   ├── jsonfmt.ts         Format/minify/sort + engine-independent locator
+│   ├── yamlfmt.ts         Tidy YAML, convert to/from JSON (lazy js-yaml)
 │   ├── clipboard.ts       Copy, with a non-secure-context fallback
-│   ├── ui.ts              THE ONE EXCEPTION: DOM helpers. See §4.
+│   ├── ui.ts              DOM helpers. See §4.
+│   ├── textio.ts          DOM wiring for the two-pane text tools. See §4.
 │   └── wordlists/         BIP39, superhero and EFF short as string modules
 │
 ├── layouts/
@@ -79,7 +92,8 @@ src/
 │   ├── ToolCard.astro     Home page / "more tools" card
 │   ├── RangeField.astro   Slider + typed number box + step buttons
 │   ├── OutputPanel.astro  Result box + copy + regenerate + strength meter
-│   └── BulkPanel.astro    Count, generate, copy-all, download, per-row copy
+│   ├── BulkPanel.astro    Count, generate, copy-all, download, per-row copy
+│   └── IoPanel.astro      Input/output textareas for the text tools
 │
 ├── pages/
 │   ├── index.astro        Grid generated from the registry
@@ -90,13 +104,17 @@ src/
 │   ├── robots.txt.ts      Generated, so the sitemap URL follows the domain
 │   └── tools/
 │       ├── password-generator.astro
-│       └── passphrase-generator.astro
+│       ├── passphrase-generator.astro
+│       ├── base64.astro
+│       ├── hash-generator.astro
+│       ├── json-formatter.astro
+│       └── yaml-formatter.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 793 lines of logic in `lib/`, 508 of components and layouts, 849 of pages, 1014 of
-CSS, 341 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 1447 lines of logic in `lib/`, 575 of components and layouts, 1522 of pages, 1240 of
+CSS, 594 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -120,10 +138,11 @@ exercises them in Node, with no jsdom and no browser harness. Statistical proper
 uniformity need hundreds of thousands of iterations to test meaningfully, which is only practical
 because there is no DOM in the way.
 
-**The one exception is `lib/ui.ts`**, which is DOM-only by nature: `el`, `attachCopy`,
-`renderStrength`, `attachBulk`, `loadPrefs`. It lives in `lib/` because both tool pages import it,
-not because it fits the rule. It is deliberately the only file there that does, and
-`scripts/verify.ts` does not import it.
+**Two files in `lib/` are exceptions**, both DOM-only by nature: `ui.ts` (`el`, `attachCopy`,
+`renderStrength`, `attachBulk`, `bindStepper`, `loadPrefs`) and `textio.ts`, which wires the
+two-pane text tools. They live in `lib/` because several pages import them, not because they fit
+the rule. They are deliberately the only files there that do, and the verification scripts import
+neither.
 
 The page `<script>` blocks are thin: read the form into an options object, hand it to a `lib/`
 function, write the result into the markup. They contain no generation logic and no arithmetic.
@@ -223,9 +242,75 @@ Nothing else needs editing. The home page, nav, sitemap and cross-links pick it 
 - The digit and the symbol land on two *different* words when both are requested.
 - Separator and suffix symbol alphabets are separate sets (§8.2).
 
-### 6.3 Shared tool chrome
+### 6.3 Base64 encoder & decoder — `/tools/base64/`
 
-Both tools get the same shell, from `OutputPanel`, `BulkPanel` and `RangeField`:
+| Control | Options | Default |
+|---|---|---|
+| Direction | Encode / Decode | Encode |
+| Alphabet | standard / URL-safe (`base64url`) | standard |
+
+- **UTF-8, not Latin-1.** `btoa` throws on `"café"` and corrupts anything above U+00FF, so text
+  goes through `TextEncoder` first. Emoji, Vietnamese, Arabic and CJK all round-trip.
+- **Decoding is liberal on input, strict on output.** Whitespace is stripped, both alphabets are
+  accepted regardless of the toggle, and padding is restored — Base64 arrives wrapped at 76
+  columns and unpadded often enough that rejecting it would make the tool useless. A character
+  outside the alphabet, or a length that cannot form complete groups, is still reported.
+- Decoding uses `TextDecoder` with `fatal: true`, so binary payloads produce *"the bytes are not
+  valid UTF-8"* rather than a screen of replacement characters.
+
+### 6.4 Hash generator — `/tools/hash-generator/`
+
+| Control | Options | Default |
+|---|---|---|
+| Input | text area, or a local file | text |
+| Case | lowercase / uppercase hex | lowercase |
+
+- **All three digests at once** — MD5, SHA-256, SHA-512. A checksum you are handed rarely says
+  which algorithm produced it, and digest length identifies it: 32 hex characters, 64, or 128.
+- SHA comes from `crypto.subtle`. **MD5 is hand-written** (`lib/md5.ts`) because WebCrypto
+  deliberately refuses to implement it. The page says plainly that MD5 is broken and fit only for
+  non-adversarial checksums.
+- Files are read with `File.arrayBuffer()` and hashed in the page. Typing into the textarea takes
+  over from a loaded file rather than being silently ignored.
+- Results are tagged with a generation counter: a slower digest from an earlier keystroke cannot
+  overwrite a newer one.
+
+### 6.5 JSON formatter — `/tools/json-formatter/`
+
+| Control | Options | Default |
+|---|---|---|
+| Output | Pretty / Minify | Pretty |
+| Indent | 2 spaces, 4 spaces, tab | 2 |
+| Sort object keys | on / off | off |
+
+- **Errors are located, not quoted.** See §8.4 — the position is found by bisection over
+  `JSON.parse`, not by scraping the engine's message.
+- Sorting is recursive over objects. **Array order is never touched**: in JSON an array's order is
+  data, so reordering it would change the document rather than reformat it.
+- Minify reports how many characters it saved.
+
+### 6.6 YAML formatter — `/tools/yaml-formatter/`
+
+| Control | Options | Default |
+|---|---|---|
+| Mode | Tidy YAML / YAML → JSON / JSON → YAML | Tidy YAML |
+| Indent | 2 or 4 spaces | 2 |
+| Sort mapping keys | on / off | off |
+
+- Pane labels, the placeholder and the Sample button all follow the mode, so *Sample* never loads
+  JSON into a YAML parse.
+- **Reformatting is lossy and the page says so.** The document is parsed to data and printed
+  fresh, so comments, blank lines and quoting style do not survive; anchors and aliases are
+  expanded rather than preserved. A check in the suite asserts that comments are dropped, so the
+  documented behaviour cannot drift silently.
+- `loadAll`, not `load`: a `---` stream is read in full. Tidy mode re-emits every document; YAML →
+  JSON yields an array.
+- js-yaml is imported on demand and cached, so the parser is fetched once, only on this page.
+
+### 6.7 Shared tool chrome
+
+The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
+`IoPanel` and `lib/textio.ts`:
 
 - **Numeric fields** — every count control offers three ways in: drag the slider, type an exact
   value, or step by one with the ± buttons. The range input stays canonical; `bindStepper` mirrors
@@ -241,13 +326,17 @@ Both tools get the same shell, from `OutputPanel`, `BulkPanel` and `RangeField`:
   transient "Copied" label, and an ARIA live region so the flash is announced.
 - **Bulk panel** — count, generate, copy all, download `.txt`, per-row copy.
 - **Error line** — `role="alert"`, used for impossible option combinations.
+- **Text panes** — input and output textareas side by side above 820px, stacked below; a
+  character/byte/line count under each; Copy, Save, Clear, Sample, and *Use as input* to feed a
+  result back. Transforms are debounced at 140 ms and tagged with a generation counter, so an
+  async result (the first YAML parse, which waits on an import) can never overwrite a newer one.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
-  `tt-passphrase-v2`) and restored on the next visit. Output is never stored. A stored value naming
+  `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`) and restored on the next visit. Output is never stored. A stored value naming
   a wordlist or separator we no longer ship falls back to the default instead of blanking the
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.4 Site-wide
+### 6.8 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
@@ -327,7 +416,25 @@ One known over-estimate, documented on the page itself: **"at least one of each 
 space slightly** compared with a free draw, so the reported bits are a fraction of a bit high at
 typical lengths.
 
-### 8.4 Headers
+### 8.4 Locating a JSON error
+
+`JSON.parse` tells you *what* is wrong; where it went wrong is engine-specific and moves between
+versions. Current V8 uses two formats — one with `at position N`, one with only a quoted snippet —
+Firefox reports `line L column C` in its own words, and the wording has changed before.
+
+So the position is not read from the message at all. `findErrorIndex` bisects on a predicate every
+engine agrees with: **did the parser consume the whole prefix and simply want more input?** That is
+true when the prefix parses, or when the reported offset is at the prefix's end. The largest prefix
+satisfying it ends exactly at the first character the parser cannot accept.
+
+The cost is O(log n) parses of an O(n) prefix; above 2 MB the tool falls back to the engine's own
+message rather than spending the time. The engine's wording is still used for the *reason*, with
+its position clause stripped so the message does not state the location twice.
+
+This was found the honest way: the first implementation scraped `at position N`, and a check in the
+suite failed against the V8 build in use. Seven exact offsets are now pinned in `verify-tools.ts`.
+
+### 8.5 Headers
 
 `vercel.json` sets CSP, HSTS, `X-Content-Type-Options`, `Referrer-Policy: no-referrer`,
 `X-Frame-Options: DENY` and a restrictive `Permissions-Policy`, plus immutable caching for hashed
@@ -345,7 +452,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 81 checks, Node, no browser
+npm run verify   # 145 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -364,6 +471,19 @@ npm run build    # runs check first, then the static build
 - **Passphrase composition** — word count, separators, capitalisation modes, digit and symbol
   landing on different words, suffix symbols never colliding with separators, custom separators
   used verbatim and capped in length.
+- **MD5** — the seven RFC 1321 vectors, then `node:crypto` as an oracle at **every input length
+  from 0 to 200 bytes** (55/56/57 and 63/64/65 are where a hand-written MD5 usually breaks) and on
+  a 3 MB buffer, which exercises the 64-bit length field.
+- **SHA** — published vectors for SHA-256 and SHA-512, UTF-8 handling, and that hashing a
+  `subarray` view digests its own bytes rather than the whole backing buffer.
+- **Base64** — ASCII and non-ASCII round-trips, agreement with Node's Base64, URL-safe output and
+  cross-alphabet decoding, tolerance of wrapping and missing padding, rejection of invalid input,
+  and that binary payloads are reported rather than turned into mojibake.
+- **JSON** — pretty/minify/sort/tab output, seven pinned error offsets (§8.4), that array order
+  survives sorting, and that JSON5-isms (trailing commas, unquoted keys, comments) are rejected.
+- **YAML** — all three modes, indent and sort options, multi-document streams, error location, and
+  two documented behaviours asserted so they cannot drift: comments are dropped by reformatting,
+  and unquoted `NO` stays a string under the 1.2 core schema.
 - **Merging** — that the union drops duplicates, equals sum minus overlap, loses no source word,
   invents none, is order-stable across calls, and is unchanged by passing a list twice. BIP39 is
   additionally checked for its defining property: 2,048 words unique in their first four letters.
@@ -396,14 +516,20 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 14.7 KB (3.7 KB) | every page |
-| Shared logic chunk | 9.7 KB (4.2 KB) | tool pages |
-| Theme + prefetch | 2.5 KB (1.1 KB) | every page |
-| Password page script | 3.3 KB (1.6 KB) | password page |
-| Passphrase page script | 3.0 KB (1.5 KB) | passphrase page |
-| Superhero wordlist | 0.9 KB (0.6 KB) | passphrase page, on demand |
-| EFF short wordlist | 7.2 KB (3.4 KB) | passphrase page, on demand |
-| BIP39 English wordlist | 13.2 KB (6.3 KB) | passphrase page, on demand |
+| CSS | 17.2 KB (4.0 KB) | every page |
+| Theme + prefetch | 2.4 KB (1.1 KB) | every page |
+| Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
+| Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
+| Password page script | 3.2 KB (1.5 KB) | password page |
+| Passphrase page script | 3.0 KB (1.4 KB) | passphrase page |
+| Base64 page script | 1.7 KB (1.0 KB) | Base64 page |
+| Hash page script | 3.3 KB (1.6 KB) | hash page |
+| JSON page script | 2.1 KB (1.1 KB) | JSON page |
+| YAML page script | 2.6 KB (1.3 KB) | YAML page |
+| Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
+| EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
+| BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
+| js-yaml | 58.2 KB (17.4 KB) | YAML page, on demand |
 
 A tool page is about 6 KB of gzipped JavaScript before the wordlist.
 
@@ -430,17 +556,21 @@ Honest list, in rough order of how much they matter:
 3. **`entropy.ts` imports from `passphrase.ts`** for the symbol alphabets, which pulls passphrase
    code into the password page's shared chunk. Small, but a real coupling; moving the symbol
    constants into their own module would break it.
-4. **The shared chunk is named `icons.*.js`.** Rollup named it after one of its inputs; it
-   actually contains the CSPRNG and UI helpers. Harmless, but misleading in a network tab.
-5. **No `modulepreload` for the shared chunk**, so it is a second round trip after the page script.
-   Irrelevant at 3.7 KB, worth revisiting if it grows.
-6. **CSP allows `'unsafe-inline'` for scripts.** Reasoning in §8.4; the tradeoff is deliberate,
+4. **No `modulepreload` for the shared chunk**, so it is a second round trip after the page
+   script. Irrelevant at 3.8 KB, worth revisiting if it grows.
+5. **The text panes have no syntax highlighting or line numbers.** For formatters whose error
+   messages name a line, a plain textarea makes the reader count. An editor component would be the
+   single heaviest asset on the site, so this stays a deliberate trade rather than an oversight.
+6. **Reformatting YAML drops comments.** Inherent to parse-and-print; the page warns and a check
+   pins the behaviour, but preserving them would need a CST-based emitter that js-yaml does not
+   offer.
+7. **CSP allows `'unsafe-inline'` for scripts.** Reasoning in §8.5; the tradeoff is deliberate,
    not an oversight.
-7. **No internationalisation.** The UI is English-only, with no structure in place for anything
+8. **No internationalisation.** The UI is English-only, with no structure in place for anything
    else.
-8. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
+9. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
    such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
    word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
    test before it was understood.
-9. **Planned tools are registry entries only.** Hash, UUID, Base64 and JWT tools have cards and
-   nothing behind them.
+10. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
+    behind them.

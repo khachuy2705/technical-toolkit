@@ -23,8 +23,8 @@ import { SITE } from "../data/site";
     <p>
       The whole site is static HTML, CSS and JavaScript, built with Astro and served from a CDN.
       There is no backend and no database, so there is nothing to breach and nothing to leak. Every
-      tool does its work in your browser after the page has loaded; you can put the tab in aeroplane
-      mode and it keeps working.
+      tool does its work in your browser. A few pieces load on demand the first time you need them —
+      a wordlist, the YAML parser — so a page you have already used keeps working offline.
     </p>
 
     <h2>Randomness</h2>
@@ -33,6 +33,20 @@ import { SITE } from "../data/site";
       cryptographically secure generator, with rejection sampling so values are drawn uniformly.
       <code>Math.random()</code> is never used: its state is recoverable from a few outputs, which
       would make anything derived from it predictable.
+    </p>
+
+    <h2>The one dependency</h2>
+    <p>
+      Everything here is written from scratch except YAML parsing, which uses
+      <a href="https://github.com/nodeca/js-yaml">js-yaml</a> (MIT). YAML is a large specification
+      with genuinely surprising corners, and a formatter that quietly misreads your document is
+      worse than no formatter at all. It is bundled with the site rather than loaded from a CDN, and
+      only the YAML page ever downloads it.
+    </p>
+    <p>
+      MD5 is the other thing worth naming: <code>crypto.subtle</code> refuses to implement it, so
+      the hash tool carries a hand-written implementation, pinned against the RFC 1321 test vectors
+      and cross-checked against Node&rsquo;s own MD5 at every input length from 0 to 200 bytes.
     </p>
 
     <h2>Wordlists</h2>

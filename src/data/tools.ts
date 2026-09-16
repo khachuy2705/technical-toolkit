@@ -45,11 +45,12 @@ export const TOOLS: readonly Tool[] = [
   {
     slug: 'hash-generator',
     name: 'Hash Generator',
-    tagline: 'SHA-256, SHA-384 and SHA-512 over text or files.',
-    description: 'Compute cryptographic hashes locally in your browser.',
-    keywords: ['hash', 'sha256', 'checksum'],
+    tagline: 'MD5, SHA-256 and SHA-512 over text or a file.',
+    description:
+      'Compute MD5, SHA-256 and SHA-512 digests of text or a file, entirely in your browser. All three are shown at once, so you never have to guess which one a checksum came from.',
+    keywords: ['hash generator', 'md5', 'sha256', 'sha512', 'checksum'],
     icon: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
-    status: 'planned',
+    status: 'live',
   },
   {
     slug: 'uuid-generator',
@@ -62,12 +63,33 @@ export const TOOLS: readonly Tool[] = [
   },
   {
     slug: 'base64',
-    name: 'Base64 Encoder',
-    tagline: 'Encode and decode text, URLs and files.',
-    description: 'Encode and decode Base64 locally in your browser.',
-    keywords: ['base64', 'encode', 'decode'],
+    name: 'Base64 Encoder & Decoder',
+    tagline: 'Round-trip text safely, including non-ASCII.',
+    description:
+      'Encode and decode Base64 in your browser, with correct UTF-8 handling and a URL-safe variant. Decoding accepts wrapped, unpadded and URL-safe input.',
+    keywords: ['base64', 'encode', 'decode', 'base64url'],
     icon: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
-    status: 'planned',
+    status: 'live',
+  },
+  {
+    slug: 'json-formatter',
+    name: 'JSON Formatter',
+    tagline: 'Pretty-print, minify and validate.',
+    description:
+      'Format, minify and validate JSON in your browser. Parse errors are reported with the line and column that broke.',
+    keywords: ['json formatter', 'json beautifier', 'json validator', 'minify json'],
+    icon: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>',
+    status: 'live',
+  },
+  {
+    slug: 'yaml-formatter',
+    name: 'YAML Formatter',
+    tagline: 'Tidy YAML, or convert to and from JSON.',
+    description:
+      'Reindent and validate YAML, or convert between YAML and JSON, in your browser. Errors are reported with the line and column that broke.',
+    keywords: ['yaml formatter', 'yaml to json', 'json to yaml', 'yaml validator'],
+    icon: '<path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="m8 9 4 4 4-4"/><path d="M12 13v4"/>',
+    status: 'live',
   },
   {
     slug: 'jwt-decoder',

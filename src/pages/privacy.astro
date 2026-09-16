@@ -13,8 +13,10 @@ import { SITE } from "../data/site";
     <h2>No collection</h2>
     <p>
       There is no analytics script, no tag manager, no advertising pixel, no error-reporting SDK and
-      no font or asset loaded from a third party. The site makes no network request after the page
-      and its assets have loaded.
+      no font or asset loaded from a third party. The only requests this site ever makes are for its
+      own code: some of it — a wordlist, the YAML parser — is fetched on demand the first time you
+      need it, from the same origin as the page. <b>No request ever carries anything you typed</b>,
+      because nothing you type is sent anywhere.
     </p>
 
     <h2>No accounts</h2>

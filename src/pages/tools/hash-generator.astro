@@ -1,0 +1,243 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { HASH_ALGORITHMS } from "../../lib/hash";
+---
+
+<ToolLayout slug="hash-generator">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="hash-input">Text</label>
+      <span class="io__meta" id="input-meta"></span>
+      <label class="check" style="padding:0">
+        <input type="checkbox" id="uppercase" />
+        <span class="check__text">Uppercase</span>
+      </label>
+      <button type="button" class="btn btn--tiny" id="hash-clear">Clear</button>
+    </div>
+
+    <textarea
+      id="hash-input"
+      class="io__text"
+      style="min-height:9rem"
+      placeholder="Type or paste anything…"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"></textarea>
+
+    <div class="file-field">
+      <label for="hash-file">…or hash a file:</label>
+      <input type="file" id="hash-file" />
+      <span id="file-meta"></span>
+    </div>
+  </section>
+
+  <ul class="hash-list">
+    {
+      HASH_ALGORITHMS.map((algorithm) => (
+        <li class:list={["hash-row", algorithm.id === "md5" && "hash-row--weak"]}>
+          <div class="hash-row__head">
+            <span class="hash-row__name">{algorithm.label}</span>
+            <span class="hash-row__note">
+              {algorithm.bits}-bit &middot; {algorithm.note}
+            </span>
+            <button
+              type="button"
+              class="btn btn--tiny"
+              data-copy={algorithm.id}
+              aria-label={`Copy the ${algorithm.label} digest`}
+            >
+              <Icon paths={ICONS.copy} size={13} strokeWidth={1.9} />
+              <span data-label>Copy</span>
+            </button>
+          </div>
+          <div class="hash-row__value" data-value={algorithm.id} data-empty="true">
+            &mdash;
+          </div>
+        </li>
+      ))
+    }
+  </ul>
+
+  <p class="output__error" id="hash-error" role="alert" hidden></p>
+
+  <section class="card prose">
+    <h2>All three at once, on purpose</h2>
+    <p>
+      A checksum you are handed rarely says which algorithm produced it. Showing every digest
+      together means you can match by length — 32 hex characters is MD5, 64 is SHA-256, 128 is
+      SHA-512 — instead of guessing and re-running.
+    </p>
+
+    <h2>MD5 is here, and it is broken</h2>
+    <p>
+      Collisions in MD5 are trivial to produce: two different inputs can be made to share a digest
+      in seconds on a laptop. It is fine for detecting accidental corruption — a truncated download,
+      a bit-flipped archive — and unfit for anything an adversary touches. Never use it for
+      passwords, signatures or deduplicating untrusted content.
+    </p>
+    <p>
+      The browser agrees, which is why <code>crypto.subtle</code> refuses to implement it. SHA-256
+      and SHA-512 here come from WebCrypto; MD5 is a hand-written implementation, pinned against the
+      RFC 1321 test vectors.
+    </p>
+
+    <h2>Files stay on your machine</h2>
+    <p>
+      The file picker reads bytes locally and hashes them in the page. Nothing is uploaded — there
+      is no server to upload to. Very large files will hold the tab for a moment while they are read
+      into memory.
+    </p>
+
+    <h2>Hashing is not encryption</h2>
+    <p>
+      A digest is one-way and fixed-length: you cannot recover the input from it. Sites offering to
+      &ldquo;decrypt&rdquo; a hash are running a lookup table of already-known inputs, which is
+      exactly why an unsalted hash of a password is not protection.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import { HASH_ALGORITHMS, hashBytes, type HashId } from "../../lib/hash";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-hash";
+
+  const input = el<HTMLTextAreaElement>("#hash-input");
+  const fileInput = el<HTMLInputElement>("#hash-file");
+  const fileMeta = el<HTMLElement>("#file-meta");
+  const inputMeta = el<HTMLElement>("#input-meta");
+  const uppercase = el<HTMLInputElement>("#uppercase");
+  const errorBox = el<HTMLParagraphElement>("#hash-error");
+
+  const values = new Map<HashId, HTMLElement>(
+    all<HTMLElement>("[data-value]").map((node) => [node.dataset["value"] as HashId, node]),
+  );
+
+  uppercase.checked = Boolean(loadPrefs(PREFS_KEY, { uppercase: false }).uppercase);
+
+  /** Latest digests, kept so the Uppercase toggle needs no re-hash. */
+  let digests = new Map<HashId, string>();
+  /** Set when a file is loaded; cleared when the textarea is used instead. */
+  let fileBytes: Uint8Array | undefined;
+  let generation = 0;
+
+  function paint(): void {
+    for (const [id, node] of values) {
+      const hex = digests.get(id);
+      if (hex === undefined || hex.length === 0) {
+        node.textContent = "—";
+        node.dataset["empty"] = "true";
+      } else {
+        node.textContent = uppercase.checked ? hex.toUpperCase() : hex;
+        delete node.dataset["empty"];
+      }
+    }
+  }
+
+  function describe(bytes: number, chars?: number): string {
+    const size =
+      bytes < 1024
+        ? `${bytes} bytes`
+        : bytes < 1024 * 1024
+          ? `${(bytes / 1024).toFixed(1)} KB`
+          : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return chars === undefined ? size : `${chars.toLocaleString("en-US")} chars · ${size}`;
+  }
+
+  async function run(): Promise<void> {
+    const mine = ++generation;
+    const bytes = fileBytes ?? new TextEncoder().encode(input.value);
+
+    if (!fileBytes) {
+      inputMeta.textContent = input.value.length === 0 ? "" : describe(bytes.length, input.value.length);
+    }
+
+    // An empty textarea hashes to the well-known empty digests, which is more
+    // confusing than helpful as a landing state.
+    if (bytes.length === 0 && !fileBytes) {
+      digests = new Map();
+      errorBox.hidden = true;
+      paint();
+      return;
+    }
+
+    try {
+      const results = await Promise.all(
+        HASH_ALGORITHMS.map(async (algorithm) => [
+          algorithm.id,
+          await hashBytes(algorithm.id, bytes),
+        ] as const),
+      );
+      // A slower algorithm from an earlier keystroke must not overwrite a newer result.
+      if (mine !== generation) return;
+      digests = new Map(results);
+      errorBox.hidden = true;
+    } catch (error) {
+      if (mine !== generation) return;
+      digests = new Map();
+      errorBox.textContent =
+        error instanceof Error
+          ? `Could not hash: ${error.message}`
+          : "Could not hash this input.";
+      errorBox.hidden = false;
+    }
+    paint();
+  }
+
+  input.addEventListener("input", () => {
+    if (fileBytes) {
+      // Typing takes over from the loaded file rather than being ignored.
+      fileBytes = undefined;
+      fileInput.value = "";
+      fileMeta.textContent = "";
+    }
+    void run();
+  });
+
+  uppercase.addEventListener("change", () => {
+    savePrefs(PREFS_KEY, { uppercase: uppercase.checked });
+    paint();
+  });
+
+  el<HTMLButtonElement>("#hash-clear").addEventListener("click", () => {
+    input.value = "";
+    fileBytes = undefined;
+    fileInput.value = "";
+    fileMeta.textContent = "";
+    input.focus();
+    void run();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    fileMeta.textContent = `Reading ${file.name}…`;
+    void file
+      .arrayBuffer()
+      .then((buffer) => {
+        fileBytes = new Uint8Array(buffer);
+        fileMeta.textContent = `${file.name} · ${describe(fileBytes.length)}`;
+        inputMeta.textContent = "";
+        return run();
+      })
+      .catch(() => {
+        fileMeta.textContent = "";
+        errorBox.textContent = "Could not read that file.";
+        errorBox.hidden = false;
+      });
+  });
+
+  for (const button of all<HTMLButtonElement>("[data-copy]")) {
+    const id = button.dataset["copy"] as HashId;
+    attachCopy(button, () => {
+      const hex = digests.get(id) ?? "";
+      return uppercase.checked ? hex.toUpperCase() : hex;
+    });
+  }
+
+  paint();
+</script>
