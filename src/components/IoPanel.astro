@@ -12,6 +12,12 @@ interface Props {
   placeholder?: string;
   /** Shows the "Use as input" button, for tools whose output can be fed back. */
   swappable?: boolean;
+  /**
+   * Starting height of both panes, as a CSS length. Tools whose documents run
+   * long — JSON, YAML — want more room than a Base64 blob does. The textareas
+   * stay user-resizable either way.
+   */
+  minHeight?: string;
 }
 
 const {
@@ -19,10 +25,11 @@ const {
   outputLabel = "Output",
   placeholder = "Paste or type here…",
   swappable = false,
+  minHeight,
 } = Astro.props;
 ---
 
-<section class="io">
+<section class="io" style={minHeight ? `--io-min-height: ${minHeight}` : undefined}>
   <div class="io__pane">
     <div class="io__head">
       <label class="io__label" for="io-input">{inputLabel}</label>

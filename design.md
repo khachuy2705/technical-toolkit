@@ -328,7 +328,9 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Error line** — `role="alert"`, used for impossible option combinations.
 - **Text panes** — input and output textareas side by side above 820px, stacked below; a
   character/byte/line count under each; Copy, Save, Clear, Sample, and *Use as input* to feed a
-  result back. Transforms are debounced at 140 ms and tagged with a generation counter, so an
+  result back. Height starts at 15rem and is per-tool: `IoPanel` takes a `minHeight` prop that
+  sets `--io-min-height`, which the JSON formatter doubles to 30rem because its documents run long.
+  Both panes stay user-resizable regardless. Transforms are debounced at 140 ms and tagged with a generation counter, so an
   async result (the first YAML parse, which waits on an import) can never overwrite a newer one.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
   `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`) and restored on the next visit. Output is never stored. A stored value naming
