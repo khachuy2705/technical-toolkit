@@ -13,6 +13,7 @@ import { lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
   classifyAddress,
   describeNetwork,
+  formatCidr,
   formatIpv4,
   maskFromPrefix,
   parseCidr,
@@ -287,6 +288,33 @@ export async function runToolChecks(check: Check): Promise<void> {
       const expected = [prefix, mask, network, first, last, usable];
       check(text + " resolves correctly", actual.join("|") === expected.join("|"), actual.join(" ") + " vs " + expected.join(" "));
     }
+
+    // The canonical form a route table or firewall rule wants: the network, not
+    // the host address that was typed. Each pair is host input -> subnet.
+    const CANONICAL: readonly [string, string][] = [
+      ["10.144.141.83/26", "10.144.141.64/26"],
+      ["192.168.1.200/24", "192.168.1.0/24"],
+      ["172.16.5.3/30", "172.16.5.0/30"],
+      ["10.0.0.7/8", "10.0.0.0/8"],
+      ["203.0.113.7/31", "203.0.113.6/31"],
+      ["10.1.2.3/32", "10.1.2.3/32"],
+      ["255.255.255.255/1", "128.0.0.0/1"],
+    ];
+    for (const [input, expected] of CANONICAL) {
+      const parsed = parseCidr(input);
+      const net = describeNetwork(parsed.address, parsed.prefix);
+      const actual = formatCidr(net.network, net.prefix);
+      check(input + " is in " + expected, actual === expected, actual);
+    }
+
+    check(
+      "the canonical form is idempotent",
+      CANONICAL.every(([, subnet]) => {
+        const parsed = parseCidr(subnet);
+        const net = describeNetwork(parsed.address, parsed.prefix);
+        return formatCidr(net.network, net.prefix) === subnet;
+      }),
+    );
 
     check("broadcast of a /24", formatIpv4(describeNetwork(parseIpv4("192.168.1.10"), 24).broadcast) === "192.168.1.255");
     check("wildcard of a /24", formatIpv4(describeNetwork(parseIpv4("192.168.1.10"), 24).wildcard) === "0.0.0.255");

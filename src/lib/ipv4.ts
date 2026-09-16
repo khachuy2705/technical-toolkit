@@ -15,6 +15,16 @@ export function formatIpv4(value: number): string {
 }
 
 /**
+ * Canonical CIDR notation for a network: the network address, never the host
+ * address that was typed. `10.144.141.83/26` describes the same subnet as
+ * `10.144.141.64/26`, but only the second form is the one to paste into a route
+ * table or a firewall rule.
+ */
+export function formatCidr(network: number, prefix: number): string {
+  return `${formatIpv4(network)}/${prefix}`;
+}
+
+/**
  * Parses dotted-quad notation.
  *
  * Leading zeros are rejected rather than accepted. `inet_aton` and several

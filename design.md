@@ -115,8 +115,8 @@ src/
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 1678 lines of logic in `lib/`, 582 of components and layouts, 1856 of pages, 1405 of
-CSS, 735 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 1688 lines of logic in `lib/`, 582 of components and layouts, 1888 of pages, 1434 of
+CSS, 763 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -315,9 +315,12 @@ One text field, everything derived from it as you type. Accepts `10.0.0.1/24`,
 `10.0.0.1/255.255.255.0`, a space instead of the slash, or a bare address (taken as `/32`, and the
 page says so rather than silently assuming).
 
-The four values the tool was asked for — CIDR prefix, subnet mask, network address, first usable
-host — lead and carry the accent colour. Broadcast, last usable host, usable and total counts,
-wildcard mask and address type follow, because a subnet calculator missing them is half a tool.
+**Network (CIDR)** leads: `10.144.141.83/26` in, `10.144.141.64/26` out. That canonical form —
+network address with the host bits cleared, prefix attached — is what goes into a route table or a
+firewall rule, and it is the value most likely to be copied. The four the tool was originally asked
+for follow and share the accent colour: CIDR prefix, subnet mask, network address, first usable
+host. Then broadcast, last usable host, usable and total counts, wildcard mask and address type,
+because a subnet calculator missing those is half a tool.
 
 Three details that separate a correct calculator from a plausible one:
 
@@ -495,7 +498,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 191 checks, Node, no browser
+npm run verify   # 199 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -528,8 +531,9 @@ npm run build    # runs check first, then the static build
   two documented behaviours asserted so they cannot drift: comments are dropped by reformatting,
   and unquoted `NO` stays a string under the 1.2 core schema.
 - **IPv4** — parsing and rejection (malformed octets, leading zeros, non-contiguous masks), the
-  full /0–/32 mask table pinned as literals because the page publishes it, every prefix
-  round-tripping through its mask, five worked networks checked field by field, the /31 and
+  full /0–/32 mask table pinned as literals because the page publishes it, seven host-to-subnet
+  conversions with the canonical form asserted idempotent, every prefix round-tripping through its
+  mask, five worked networks checked field by field, the /31 and
   /32 special cases, that usable hosts never go negative at any prefix, that high addresses stay
   unsigned, and eleven address-type classifications.
 - **Merging** — that the union drops duplicates, equals sum minus overlap, loses no source word,

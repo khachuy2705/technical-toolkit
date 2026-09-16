@@ -9,6 +9,7 @@ import { describeNetwork, formatIpv4 } from "../../lib/ipv4";
  * the supporting detail any subnet calculation needs to be useful.
  */
 const FACTS = [
+  { id: "cidr-network", label: "Network (CIDR)", primary: true },
   { id: "prefix", label: "CIDR prefix", primary: true },
   { id: "mask", label: "Subnet mask", primary: true },
   { id: "network", label: "Network address", primary: true },
@@ -212,6 +213,7 @@ const CHEAT_SHEET = Array.from({ length: 32 }, (_, index) => {
   import {
     classifyAddress,
     describeNetwork,
+    formatCidr,
     formatIpv4,
     parseCidr,
     toBinary,
@@ -284,8 +286,15 @@ const CHEAT_SHEET = Array.from({ length: 32 }, (_, index) => {
 
     inputMeta.textContent = parsed.prefixAssumed
       ? "no prefix given — assuming /32"
-      : `${formatIpv4(net.address)} in ${formatIpv4(net.network)}/${net.prefix}`;
+      : net.address === net.network
+        ? "this is the network address itself"
+        : `host address inside ${formatCidr(net.network, net.prefix)}`;
 
+    set(
+      "cidr-network",
+      formatCidr(net.network, net.prefix),
+      "the canonical form — host bits cleared",
+    );
     set("prefix", `/${net.prefix}`, `${net.prefix} network bits, ${32 - net.prefix} host bits`);
     set("mask", formatIpv4(net.mask), toBinary(net.mask));
     set(
