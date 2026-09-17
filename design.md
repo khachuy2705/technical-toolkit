@@ -69,7 +69,7 @@ src/
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── ipv4.ts            Address parsing and subnet arithmetic
-│   ├── epoch.ts           Unix time parsing, civil-date maths, zone rendering
+│   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -117,8 +117,8 @@ src/
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 2125 lines of logic in `lib/`, 582 of components and layouts, 2447 of pages, 1525 of
-CSS, 1018 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 2265 lines of logic in `lib/`, 582 of components and layouts, 2680 of pages, 1621 of
+CSS, 1094 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -370,7 +370,32 @@ tables generated at build time from the same formatter the converter runs — la
 (the epoch itself, both 32-bit overflows, the database ceiling) and common intervals in seconds
 (DNS TTLs, session timeouts, certificate lifetimes).
 
-Four decisions carry the tool:
+Directly under the clock, a **Quick convert** card holds two single-purpose boxes side by side: a
+date-and-time picker that answers with the epoch, and an epoch box that answers with the date and
+weekday. They share one time-zone selector, which **always opens on the browser's own zone** and is
+deliberately not saved between visits, so "what is this in my time" never depends on a choice made
+last week. The full inspector below keeps its own, remembered, zone.
+
+Going from a wall clock to an instant is the direction that needs care, because a wall time does
+not always name exactly one instant. `wallTimeToMs` tries the zone's offset from a day before and
+a day after, and keeps each only if the zone agrees it was in force at the result:
+
+- one survivor — the normal case;
+- two — the hour repeated when clocks went back (1 November 2026, 01:30 in New York happens twice);
+  the earlier instant is used and the later one is shown in the note;
+- none — the time was skipped when clocks went forward (8 March 2026, 02:30 in New York never
+  happened); it is pushed forward by the length of the gap.
+
+That is the resolution Temporal's default `"compatible"` mode uses, and the page states which case
+it hit in an amber note rather than returning a number that looks certain. The offset itself is
+derived from the wall clock, not parsed from ICU's `GMT+07:00` label, because local mean time
+carries seconds — Saigon was +07:06:30 until 1906 — and the label rounds them away.
+
+The picker is a native `datetime-local` with `step="1"`, so seconds are included. Typed wall times
+are range-checked field by field: `2023-02-29` and `24:00` are refused, where `Date` would roll them
+into the next day without a word.
+
+Four decisions carry the inspector:
 
 - **Nanoseconds are a `bigint`, not a number.** A 19-digit nanosecond timestamp is past
   `Number.MAX_SAFE_INTEGER`, so a converter that parses one into a double hands it back changed by
@@ -559,7 +584,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 291 checks, Node, no browser
+npm run verify   # 311 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -624,6 +649,9 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **Zone rendering** — a fixed offset, a half-hour offset, both sides of a daylight-saving
   transition in `America/New_York`, one instant falling on two different dates in Tokyo and Los
   Angeles, and a historical offset the current one would get wrong.
+- **Wall time to epoch** — the New York spring-forward gap and fall-back overlap, Lord Howe
+  Island's thirty-minute shift, Saigon's +07:06:30 local mean time, impossible dates refused, and
+  a round trip from instant to wall time and back in six zones every 7h13m across three years.
 - **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
   in full, because both tables are rendered at build time and a regression would hand every
   visitor a wrong reference.
@@ -641,7 +669,7 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 20.9 KB (4.6 KB) | every page |
+| CSS | 22.1 KB (4.8 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
 | Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
@@ -651,7 +679,7 @@ Bundle sizes as built (gzip in brackets):
 | Hash page script | 3.3 KB (1.6 KB) | hash page |
 | JSON page script | 2.1 KB (1.1 KB) | JSON page |
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
-| Epoch page script | 8.0 KB (3.6 KB) | epoch page |
+| Epoch page script | 11.6 KB (4.8 KB) | epoch page |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |

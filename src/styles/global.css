@@ -1230,9 +1230,11 @@ select {
   overflow-wrap: anywhere;
 }
 
-.now__copy {
+/* A bare icon that copies. Used where a labelled button would crowd the value. */
+.copy-icon {
   display: inline-flex;
   align-self: center;
+  flex: none;
   padding: 2px;
   border: 0;
   border-radius: 4px;
@@ -1243,13 +1245,107 @@ select {
   transition: color 0.12s ease, background 0.12s ease;
 }
 
-.now__copy:hover {
+.copy-icon:hover {
   background: var(--surface-raised);
   color: var(--accent);
 }
 
-.now__copy[data-copied="true"] {
+.copy-icon[data-copied="true"] {
   color: var(--strength-4);
+}
+
+/* --------------------------------------------------------------------------- Two-way converter */
+
+.qc__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.qc__head .card__title {
+  margin: 0;
+}
+
+.qc__zone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: min(100%, 16rem);
+}
+
+.qc {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 0.8rem;
+}
+
+.qc__pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface));
+}
+
+.qc__title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.qc__title label {
+  margin-right: auto;
+}
+
+.qc__out {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.qc__label {
+  flex: 0 0 6.5rem;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.qc__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.qc__value[data-empty="true"] {
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.qc__note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-faint);
+}
+
+/* A skipped or repeated wall time is the one result that needs reading twice. */
+.qc__note[data-warn] {
+  color: var(--strength-1);
 }
 
 /* --------------------------------------------------------------------------- Hash rows */

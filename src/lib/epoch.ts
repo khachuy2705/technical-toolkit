@@ -392,6 +392,146 @@ export function availableZones(): string[] {
   return [...new Set(["UTC", localZone(), ...zones])].sort();
 }
 
+/* ------------------------------------------------------------ wall-clock time */
+
+/** A reading off a wall clock: a date and a time, with no zone attached. */
+export interface WallTime {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+}
+
+export function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+
+/** `2026-09-17T14:03:22`, as a `datetime-local` input produces it; a space works too. */
+const WALL = /^(\d{4,6})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+/**
+ * Parses a zone-less date and time. Every field is range-checked by name:
+ * `2023-02-29` and `24:00` are refused rather than rolled over into the next
+ * day, which is what `Date` would silently do with them.
+ */
+export function parseWallTime(text: string): WallTime {
+  const match = WALL.exec(text.trim());
+  if (!match) throw new Error("Enter a date and time as YYYY-MM-DD HH:MM:SS.");
+
+  const [year, month, day, hour, minute] = match.slice(1, 6).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const second = match[6] === undefined ? 0 : Number(match[6]);
+
+  if (month < 1 || month > 12) throw new Error(`There is no month ${month}.`);
+  if (day < 1 || day > daysInMonth(year, month)) {
+    throw new Error(`${pad(year, 4)}-${pad(month)} has no day ${day}.`);
+  }
+  if (hour > 23) throw new Error(`Hour ${hour} does not exist — the day ends at 23:59:59.`);
+  if (minute > 59) throw new Error(`Minute ${minute} does not exist.`);
+  // Unix time has no leap seconds (see the page), so :60 has nothing to map to.
+  if (second > 59) throw new Error(`Second ${second} does not exist in Unix time.`);
+
+  return { year, month, day, hour, minute, second };
+}
+
+/** `2026-09-17T14:03:22` — the exact shape a `datetime-local` input accepts. */
+export function formatWallTime(wall: WallTime): string {
+  return (
+    `${pad(wall.year, 4)}-${pad(wall.month)}-${pad(wall.day)}` +
+    `T${pad(wall.hour)}:${pad(wall.minute)}:${pad(wall.second)}`
+  );
+}
+
+/** What a wall clock in `timeZone` showed at `ms`. */
+export function wallTimeAt(ms: number, timeZone: string): WallTime {
+  const { year, month, day, hour, minute, second } = zonedParts(ms, timeZone);
+  return { year, month, day, hour, minute, second };
+}
+
+/** The wall time read as if it were UTC — the "naive" instant. */
+function naiveMs(wall: WallTime): number {
+  return (
+    daysFromCivil(wall.year, wall.month, wall.day) * 86_400_000 +
+    wall.hour * 3_600_000 +
+    wall.minute * 60_000 +
+    wall.second * 1000
+  );
+}
+
+/**
+ * The zone's offset from UTC at `ms`, in milliseconds.
+ *
+ * Derived from the wall clock rather than by parsing ICU's `GMT+07:00` label,
+ * because pre-standard local mean time carries seconds — Saigon was
+ * +07:06:30 until 1906 — and the label rounds them away.
+ */
+export function zoneOffsetMs(ms: number, timeZone: string): number {
+  const whole = ms - mod(ms, 1000);
+  return naiveMs(wallTimeAt(whole, timeZone)) - whole;
+}
+
+/**
+ * - `exact`: the wall time happens once.
+ * - `gap`: clocks jumped forward over it, so it never happened.
+ * - `overlap`: clocks went back over it, so it happened twice.
+ */
+export type WallResolution = "exact" | "gap" | "overlap";
+
+export interface ZonedInstant {
+  ms: number;
+  resolution: WallResolution;
+  /** For an overlap, the later of the two instants. Otherwise null. */
+  later: number | null;
+}
+
+const DAY_MS = 86_400_000;
+
+/**
+ * The instant a wall clock in `timeZone` showed `wall`.
+ *
+ * The offsets a day either side are the only two a transition near this time
+ * can be switching between, so each is tried and kept only if the zone
+ * agrees it was in force at the resulting instant. One survivor is the normal
+ * case; two means the hour repeated; none means it was skipped.
+ *
+ * Ambiguity is resolved the way Temporal's default `"compatible"` mode does
+ * it — the earlier instant for a repeat, and a skipped time pushed forward by
+ * the length of the gap — and the resolution is returned rather than hidden,
+ * so the page can say which case it hit.
+ */
+export function wallTimeToMs(wall: WallTime, timeZone: string): ZonedInstant {
+  const naive = naiveMs(wall);
+  if (Math.abs(naive) > MAX_MS - 2 * DAY_MS) {
+    throw new Error("That date is outside the range a date can hold.");
+  }
+
+  const before = zoneOffsetMs(naive - DAY_MS, timeZone);
+  const after = zoneOffsetMs(naive + DAY_MS, timeZone);
+
+  const valid = [...new Set([before, after])]
+    .filter((offset) => zoneOffsetMs(naive - offset, timeZone) === offset)
+    .map((offset) => naive - offset)
+    .sort((a, b) => a - b);
+
+  if (valid.length === 1) return { ms: valid[0]!, resolution: "exact", later: null };
+  if (valid.length > 1) return { ms: valid[0]!, resolution: "overlap", later: valid[valid.length - 1]! };
+  return { ms: naive - before, resolution: "gap", later: null };
+}
+
+/** True for text the epoch-to-date box should accept: a plain or fractional number. */
+export function isEpochText(text: string): boolean {
+  const trimmed = text.trim();
+  return INTEGER.test(trimmed) || DECIMAL.test(trimmed);
+}
+
 /* ------------------------------------------------------------------- durations */
 
 const RELATIVE_STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [

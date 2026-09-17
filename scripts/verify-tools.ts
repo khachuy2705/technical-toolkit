@@ -15,17 +15,24 @@ import {
   civilFromDays,
   dayOfYear,
   daysFromCivil,
+  daysInMonth,
   detectUnit,
   formatSpan,
+  formatWallTime,
   formatZoned,
+  isEpochText,
   isLeapYear,
   isoWeek,
   localZone,
   parseMoment,
+  parseWallTime,
   relativeToNow,
   unitStrings,
+  wallTimeAt,
+  wallTimeToMs,
   weekdayIndex,
   WEEKDAYS,
+  zoneOffsetMs,
   zonedParts,
 } from "../src/lib/epoch";
 import {
@@ -625,6 +632,75 @@ export async function runToolChecks(check: Check): Promise<void> {
     check("relative: an hour ago", relativeToNow(now - 3600_000, now) === "1 hour ago", relativeToNow(now - 3600_000, now));
     check("relative: in two days", relativeToNow(now + 2 * 86400_000, now) === "in 2 days", relativeToNow(now + 2 * 86400_000, now));
     check("relative: the present is not a duration", relativeToNow(now, now) === "right now", relativeToNow(now, now));
+  }
+
+  console.log("\n-- epoch: wall time to epoch --");
+  {
+    const wall = parseWallTime("2026-09-17T14:03:22");
+    check("parses the datetime-local shape", formatWallTime(wall) === "2026-09-17T14:03:22", formatWallTime(wall));
+    check("a space works as well as a T", formatWallTime(parseWallTime("2026-09-17 14:03")) === "2026-09-17T14:03:00");
+    check("February has 29 days in a leap year only", daysInMonth(2024, 2) === 29 && daysInMonth(2023, 2) === 28 && daysInMonth(1900, 2) === 28);
+
+    // Date would roll each of these over into a neighbouring day without a word.
+    const IMPOSSIBLE = ["2023-02-29T00:00", "2026-04-31T00:00", "2026-13-01T00:00", "2026-09-17T24:00", "2026-09-17T12:60", "2026-09-17T12:00:60", "2026-09-17", "17/09/2026 12:00"];
+    let refused = 0;
+    for (const text of IMPOSSIBLE) {
+      try { parseWallTime(text); } catch { refused += 1; }
+    }
+    check("refuses wall times that do not exist on any calendar", refused === IMPOSSIBLE.length, `${refused}/${IMPOSSIBLE.length}`);
+
+    // One wall time, several zones. Each expected instant is independently known.
+    const ZONED: readonly [string, string, string][] = [
+      ["2026-09-17T14:03:22", "UTC", "2026-09-17T14:03:22.000Z"],
+      ["2026-09-17T14:03:22", "Asia/Ho_Chi_Minh", "2026-09-17T07:03:22.000Z"],
+      ["2026-09-17T14:03:22", "Asia/Kolkata", "2026-09-17T08:33:22.000Z"],
+      ["2026-01-15T07:00:00", "America/New_York", "2026-01-15T12:00:00.000Z"],
+      ["2026-07-15T08:00:00", "America/New_York", "2026-07-15T12:00:00.000Z"],
+      ["1970-01-01T08:00:00", "Asia/Ho_Chi_Minh", "1970-01-01T00:00:00.000Z"],
+    ];
+    for (const [text, zone, expected] of ZONED) {
+      const result = wallTimeToMs(parseWallTime(text), zone);
+      const actual = new Date(result.ms).toISOString();
+      check(`${text} in ${zone} is ${expected}`, actual === expected && result.resolution === "exact", `${actual} ${result.resolution}`);
+    }
+
+    // Spring forward: 02:00-02:59 on 8 March 2026 never happened in New York.
+    // Pushed forward by the gap, as Temporal's "compatible" mode does.
+    const gap = wallTimeToMs(parseWallTime("2026-03-08T02:30:00"), "America/New_York");
+    check("a skipped time is flagged as a gap", gap.resolution === "gap", gap.resolution);
+    check("and pushed forward by the gap's length", new Date(gap.ms).toISOString() === "2026-03-08T07:30:00.000Z", new Date(gap.ms).toISOString());
+
+    // Fall back: 01:00-01:59 on 1 November 2026 happened twice.
+    const overlap = wallTimeToMs(parseWallTime("2026-11-01T01:30:00"), "America/New_York");
+    check("a repeated time is flagged as an overlap", overlap.resolution === "overlap", overlap.resolution);
+    check("the earlier instant is chosen", new Date(overlap.ms).toISOString() === "2026-11-01T05:30:00.000Z", new Date(overlap.ms).toISOString());
+    check("and the later one is reported", overlap.later !== null && new Date(overlap.later).toISOString() === "2026-11-01T06:30:00.000Z", String(overlap.later));
+
+    // Lord Howe Island moves its clocks by thirty minutes, which breaks any
+    // code that assumes a DST shift is a whole hour.
+    const lordHowe = wallTimeToMs(parseWallTime("2026-10-04T02:15:00"), "Australia/Lord_Howe");
+    check("a half-hour DST gap is found", lordHowe.resolution === "gap" && new Date(lordHowe.ms).toISOString() === "2026-10-03T15:45:00.000Z", `${lordHowe.resolution} ${new Date(lordHowe.ms).toISOString()}`);
+
+    // Local mean time carries seconds; the ICU offset label rounds them away,
+    // which is why the offset is derived from the wall clock instead.
+    const lmt = zoneOffsetMs(Date.UTC(1900, 0, 1), "Asia/Ho_Chi_Minh");
+    check("pre-1906 Saigon is +07:06:30, seconds included", lmt === 25_590_000, String(lmt));
+
+    // Round trip: every instant's wall time must lead back to that instant, or
+    // to the other half of an overlap. Sampled every 7h13m across 2025-2027 in
+    // zones with whole-hour, half-hour and no DST.
+    const ROUND_TRIP_ZONES = ["UTC", "Asia/Ho_Chi_Minh", "America/New_York", "Europe/London", "Australia/Lord_Howe", "Asia/Kolkata"];
+    let mismatch: string | null = null;
+    for (const zone of ROUND_TRIP_ZONES) {
+      for (let ms = Date.UTC(2025, 0, 1); ms < Date.UTC(2027, 11, 31) && mismatch === null; ms += 25_980_000) {
+        const back = wallTimeToMs(wallTimeAt(ms, zone), zone);
+        if (back.ms !== ms && back.later !== ms) mismatch = `${zone} ${new Date(ms).toISOString()} -> ${new Date(back.ms).toISOString()}`;
+      }
+    }
+    check("wall time round-trips in six zones across three years", mismatch === null, mismatch ?? "");
+
+    check("the epoch box accepts plain and fractional numbers", ["1758086602", "-1", "1758086602.5", " 42 "].every(isEpochText));
+    check("and nothing else", !["", "2026-09-17", "1e9", "0x10", "1.2.3", "12 34"].some(isEpochText));
   }
 
   console.log("\n-- yaml --");

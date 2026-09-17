@@ -75,7 +75,7 @@ const INTERVALS = [
             <span class="now__value" data-now={item.id}>&mdash;</span>
             <button
               type="button"
-              class="now__copy"
+              class="copy-icon"
               data-copy-now={item.id}
               aria-label={`Copy the current time in ${item.unit}`}
               title="Copy"
@@ -86,6 +86,91 @@ const INTERVALS = [
         ))
       }
     </div>
+  </section>
+
+  <section class="card">
+    <div class="qc__head">
+      <h2 class="card__title">Quick convert</h2>
+      <div class="qc__zone">
+        <label class="field__label" for="qc-zone">Time zone for both boxes</label>
+        <select id="qc-zone"></select>
+      </div>
+    </div>
+
+    <div class="qc">
+      <div class="qc__pane">
+        <div class="qc__title">
+          <label for="qc-date">Date &amp; time &rarr; Epoch</label>
+          <button type="button" class="btn btn--tiny" id="qc-date-now">Now</button>
+        </div>
+        <input type="datetime-local" id="qc-date" class="big-input" step="1" />
+        {
+          [
+            { id: "to-seconds", label: "Seconds" },
+            { id: "to-millis", label: "Milliseconds" },
+            { id: "to-iso", label: "ISO 8601 UTC" },
+          ].map((row) => (
+            <div class="qc__out">
+              <span class="qc__label">{row.label}</span>
+              <span class="qc__value" data-qc={row.id} data-empty="true">&mdash;</span>
+              <button
+                type="button"
+                class="copy-icon"
+                data-qc-copy={row.id}
+                aria-label={`Copy the result in ${row.label.toLowerCase()}`}
+                title="Copy"
+              >
+                <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              </button>
+            </div>
+          ))
+        }
+        <p class="qc__note" id="qc-date-note" role="status"></p>
+      </div>
+
+      <div class="qc__pane">
+        <div class="qc__title">
+          <label for="qc-epoch">Epoch &rarr; Date &amp; time</label>
+          <button type="button" class="btn btn--tiny" id="qc-epoch-now">Now</button>
+        </div>
+        <input
+          type="text"
+          id="qc-epoch"
+          class="big-input"
+          placeholder="1758086602"
+          inputmode="decimal"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        {
+          [
+            { id: "to-date", label: "Date & time" },
+            { id: "to-weekday", label: "Weekday" },
+            { id: "to-utc", label: "ISO 8601 UTC" },
+          ].map((row) => (
+            <div class="qc__out">
+              <span class="qc__label">{row.label}</span>
+              <span class="qc__value" data-qc={row.id} data-empty="true">&mdash;</span>
+              <button
+                type="button"
+                class="copy-icon"
+                data-qc-copy={row.id}
+                aria-label={`Copy the ${row.label.toLowerCase()}`}
+                title="Copy"
+              >
+                <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              </button>
+            </div>
+          ))
+        }
+        <p class="qc__note" id="qc-epoch-note" role="status"></p>
+      </div>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Both boxes start in your browser&rsquo;s time zone. The epoch box reads the unit from the digit
+      count &mdash; for a forced unit, use the full inspector below.
+    </p>
   </section>
 
   <section class="card">
@@ -325,13 +410,18 @@ const INTERVALS = [
     WEEKDAYS,
     availableZones,
     dayOfYear,
+    formatWallTime,
     formatZoned,
+    isEpochText,
     isLeapYear,
     isoWeek,
     localZone,
     parseMoment,
+    parseWallTime,
     relativeToNow,
     unitStrings,
+    wallTimeAt,
+    wallTimeToMs,
     weekdayIndex,
     zonedParts,
     type UnitChoice,
@@ -371,15 +461,20 @@ const INTERVALS = [
 
   const HOME = localZone();
   const zones = availableZones();
-  const fragment = document.createDocumentFragment();
-  for (const zone of zones) {
-    const option = document.createElement("option");
-    option.value = zone;
-    option.textContent = zone;
-    fragment.append(option);
+
+  function fillZones(select: HTMLSelectElement): void {
+    const fragment = document.createDocumentFragment();
+    for (const zone of zones) {
+      const option = document.createElement("option");
+      option.value = zone;
+      option.textContent = zone === HOME ? `${zone} (browser)` : zone;
+      fragment.append(option);
+    }
+    select.append(fragment);
+    select.value = HOME;
   }
-  zoneSelect.append(fragment);
-  zoneSelect.value = HOME;
+
+  fillZones(zoneSelect);
   zoneHint.textContent = `${zones.length} zones from your browser. Yours is ${HOME}.`;
 
   /* ------------------------------------------------------------------ state */
@@ -552,6 +647,144 @@ const INTERVALS = [
   for (const button of all<HTMLButtonElement>("[data-copy-mask]")) {
     attachCopy(button, () => button.dataset["copyMask"] ?? "");
   }
+
+  /* ----------------------------------------------------------- quick convert */
+
+  // Deliberately not persisted: these two boxes always open in the browser's
+  // own zone, so "what is this in my time" never depends on a past visit.
+  const qcZone = el<HTMLSelectElement>("#qc-zone");
+  const qcDate = el<HTMLInputElement>("#qc-date");
+  const qcEpoch = el<HTMLInputElement>("#qc-epoch");
+  const qcDateNote = el<HTMLElement>("#qc-date-note");
+  const qcEpochNote = el<HTMLElement>("#qc-epoch-note");
+  fillZones(qcZone);
+
+  const qcNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-qc]").map((node) => [node.dataset["qc"]!, node]),
+  );
+  const qcValues = new Map<string, string>();
+
+  function qcSet(id: string, value: string | null): void {
+    const node = qcNodes.get(id);
+    if (value === null) qcValues.delete(id);
+    else qcValues.set(id, value);
+    if (!node) return;
+    node.textContent = value ?? "—";
+    if (value === null) node.dataset["empty"] = "true";
+    else delete node.dataset["empty"];
+  }
+
+  function qcNote(node: HTMLElement, text: string, warn = false): void {
+    node.textContent = text;
+    if (warn) node.dataset["warn"] = "";
+    else delete node.dataset["warn"];
+  }
+
+  function runDateToEpoch(): void {
+    const zone = qcZone.value;
+    const ids = ["to-seconds", "to-millis", "to-iso"];
+    if (qcDate.value === "") {
+      for (const id of ids) qcSet(id, null);
+      qcNote(qcDateNote, "Pick a date and time.");
+      return;
+    }
+
+    let result: ReturnType<typeof wallTimeToMs>;
+    try {
+      result = wallTimeToMs(parseWallTime(qcDate.value), zone);
+    } catch (error) {
+      for (const id of ids) qcSet(id, null);
+      qcNote(qcDateNote, error instanceof Error ? error.message : String(error), true);
+      return;
+    }
+
+    qcSet("to-seconds", String(Math.floor(result.ms / 1000)));
+    qcSet("to-millis", String(result.ms));
+    qcSet("to-iso", new Date(result.ms).toISOString());
+
+    const offset = zonedParts(result.ms, zone).offset;
+    if (result.resolution === "gap") {
+      qcNote(
+        qcDateNote,
+        `That time never happened in ${zone} — the clocks jumped forward over it. Read as ${formatZoned(result.ms, zone)}.`,
+        true,
+      );
+    } else if (result.resolution === "overlap" && result.later !== null) {
+      qcNote(
+        qcDateNote,
+        `That time happened twice in ${zone} — the clocks went back. Showing the first (${offset}); the second is ${Math.floor(result.later / 1000)}.`,
+        true,
+      );
+    } else {
+      qcNote(qcDateNote, `Read in ${zone}, which was UTC${offset} on that date.`);
+    }
+  }
+
+  function runEpochToDate(): void {
+    const zone = qcZone.value;
+    const ids = ["to-date", "to-weekday", "to-utc"];
+    const text = qcEpoch.value;
+    if (text.trim() === "") {
+      for (const id of ids) qcSet(id, null);
+      qcNote(qcEpochNote, "Type an epoch number.");
+      return;
+    }
+
+    let moment: ReturnType<typeof parseMoment>;
+    try {
+      if (!isEpochText(text)) {
+        throw new Error("Only digits here — an optional minus sign and decimal point are fine.");
+      }
+      moment = parseMoment(text);
+    } catch (error) {
+      for (const id of ids) qcSet(id, null);
+      qcNote(qcEpochNote, error instanceof Error ? error.message : String(error), true);
+      return;
+    }
+
+    const wall = zonedParts(moment.ms, zone);
+    qcSet("to-date", formatZoned(moment.ms, zone));
+    qcSet("to-weekday", WEEKDAYS[weekdayIndex(wall.year, wall.month, wall.day)]!);
+    qcSet("to-utc", new Date(moment.ms).toISOString());
+    qcNote(qcEpochNote, `${moment.how}; shown in ${zone}.`);
+  }
+
+  function qcNow(): { wall: string; seconds: string } {
+    const ms = Date.now();
+    return {
+      wall: formatWallTime(wallTimeAt(ms, qcZone.value)),
+      seconds: String(Math.floor(ms / 1000)),
+    };
+  }
+
+  qcDate.addEventListener("input", runDateToEpoch);
+  qcEpoch.addEventListener("input", runEpochToDate);
+  // Changing the zone keeps the wall time as typed and asks again what instant
+  // it names there — that re-reading is the whole point of the selector.
+  qcZone.addEventListener("change", () => {
+    runDateToEpoch();
+    runEpochToDate();
+  });
+
+  el<HTMLButtonElement>("#qc-date-now").addEventListener("click", () => {
+    qcDate.value = qcNow().wall;
+    runDateToEpoch();
+  });
+  el<HTMLButtonElement>("#qc-epoch-now").addEventListener("click", () => {
+    qcEpoch.value = qcNow().seconds;
+    runEpochToDate();
+  });
+
+  for (const button of all<HTMLButtonElement>("[data-qc-copy]")) {
+    const id = button.dataset["qcCopy"]!;
+    attachCopy(button, () => qcValues.get(id) ?? "");
+  }
+
+  const opening = qcNow();
+  qcDate.value = opening.wall;
+  qcEpoch.value = opening.seconds;
+  runDateToEpoch();
+  runEpochToDate();
 
   tick();
   window.setInterval(tick, 1000);
