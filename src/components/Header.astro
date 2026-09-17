@@ -1,5 +1,5 @@
 ---
-import { LIVE_TOOLS, toolHref, toolText } from "../data/tools";
+import { TOOL_GROUPS } from "../data/tools";
 import { CHROME, type Lang } from "../data/i18n";
 import { SITE } from "../data/site";
 import ThemeToggle from "./ThemeToggle.astro";
@@ -11,6 +11,8 @@ interface Props {
 const lang = Astro.props.lang ?? "en";
 const text = CHROME[lang];
 const path = Astro.url.pathname;
+// Tools are listed by group on the home page; the header links to each group
+// rather than to thirteen tools that would not fit on one line.
 const isCurrent = (href: string) => path === href || path === href.replace(/\/$/, "");
 ---
 
@@ -38,13 +40,9 @@ const isCurrent = (href: string) => path === href || path === href.replace(/\/$/
 
     <nav class="site-nav" aria-label={text.mainNav}>
       {
-        LIVE_TOOLS.map((tool) => (
-          <a
-            class="nav-tool"
-            href={toolHref(tool)}
-            aria-current={isCurrent(toolHref(tool)) ? "page" : undefined}
-          >
-            {lang === "en" ? tool.name.replace(" Generator", "") : toolText(tool, lang).name}
+        TOOL_GROUPS.map((group) => (
+          <a class="nav-tool" href={`/#${group.id}`}>
+            {lang === "vi" ? group.vi : group.name}
           </a>
         ))
       }

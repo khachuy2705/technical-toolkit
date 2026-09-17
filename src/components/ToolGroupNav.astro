@@ -1,0 +1,43 @@
+---
+/**
+ * The sibling strip at the top of a tool page: every live tool in the same
+ * group, the current one marked. Generated from the registry, so a new tool in
+ * a group appears on all its siblings' pages without touching them.
+ */
+import { groupById, liveToolsIn, toolBySlug, toolHref, toolText } from "../data/tools";
+import type { Lang } from "../data/i18n";
+
+interface Props {
+  slug: string;
+  lang?: Lang;
+}
+
+const { slug, lang = "en" } = Astro.props;
+const tool = toolBySlug(slug);
+const group = groupById(tool.group);
+const siblings = liveToolsIn(tool.group);
+const groupName = lang === "vi" ? group.vi : group.name;
+const label = lang === "vi" ? `Công cụ nhóm ${groupName}` : `${groupName} tools`;
+---
+
+{
+  siblings.length > 1 && (
+    <nav class="group-nav" aria-label={label}>
+      <a class="group-nav__label" href={`/#${group.id}`}>
+        {groupName}
+      </a>
+      <ul class="group-nav__list">
+        {siblings.map((sibling) => (
+          <li>
+            <a
+              href={toolHref(sibling)}
+              aria-current={sibling.slug === slug ? "page" : undefined}
+            >
+              {toolText(sibling, lang).name}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
+}

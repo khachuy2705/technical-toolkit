@@ -1,0 +1,333 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { SPLIT_EXPORT_LIMIT as EXPORT_LIMIT, SPLIT_TABLE_LIMIT as TABLE_LIMIT } from "../../lib/iprange";
+
+const FACTS = [
+  { id: "parent", label: "Network", primary: true },
+  { id: "prefix", label: "New prefix", primary: true },
+  { id: "count", label: "Subnets", primary: true },
+  { id: "size", label: "Addresses each", primary: false },
+  { id: "usable", label: "Usable hosts each", primary: false },
+] as const;
+
+const PRESETS = ["10.0.0.0/24", "172.16.0.0/16", "192.168.10.0/23", "2001:db8::/48", "2001:db8:abcd::/56"];
+
+---
+
+<ToolLayout slug="cidr-splitter">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="parent">Network to split</label>
+      <span class="io__meta" id="parent-meta"></span>
+    </div>
+    <input
+      type="text"
+      id="parent"
+      class="big-input"
+      value="10.0.0.0/24"
+      placeholder="10.0.0.0/24 or 2001:db8::/48"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+    />
+
+    <div class="controls" style="margin-top:1rem">
+      <div class="field">
+        <span class="field__label">Split by</span>
+        <div class="segmented" role="radiogroup" aria-label="Split by">
+          <label>
+            <input type="radio" name="by" value="count" checked />
+            <span>Number of subnets</span>
+          </label>
+          <label>
+            <input type="radio" name="by" value="prefix" />
+            <span>Prefix length</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="amount" id="amount-label">How many subnets</label>
+        <input type="number" id="amount" class="number-input" value="4" min="1" step="1" inputmode="numeric" />
+        <p class="field__hint" id="amount-hint"></p>
+      </div>
+    </div>
+
+    <div class="preset-row">
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+    </div>
+  </section>
+
+  <p class="output__error" id="split-error" role="alert" hidden></p>
+
+  <ul class="facts">
+    {
+      FACTS.map((fact) => (
+        <li class:list={["fact", fact.primary && "fact--primary"]}>
+          <div class="fact__head">
+            <span class="fact__label">{fact.label}</span>
+          </div>
+          <span class="fact__value" data-value={fact.id} data-empty="true">
+            &mdash;
+          </span>
+          <span class="fact__note" data-note={fact.id} />
+        </li>
+      ))
+    }
+  </ul>
+
+  <section class="card">
+    <div class="io__head">
+      <h2 class="io__label">Subnets</h2>
+      <span class="io__meta" id="table-meta"></span>
+      <button type="button" class="btn btn--tiny" id="download-csv">
+        <Icon paths={ICONS.download} size={13} strokeWidth={1.9} />
+        <span data-label>CSV</span>
+      </button>
+      <button type="button" class="btn btn--tiny" id="copy-all">
+        <Icon paths={ICONS.copy} size={13} strokeWidth={1.9} />
+        <span data-label>Copy list</span>
+      </button>
+    </div>
+    <div class="table-wrap split-table">
+      <table class="sheet">
+        <caption class="visually-hidden">Each subnet with its first and last address and host count.</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="sheet__num">#</th>
+            <th scope="col">Subnet</th>
+            <th scope="col">First address</th>
+            <th scope="col">Last address</th>
+            <th scope="col" class="sheet__num">Usable hosts</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose">
+    <h2>Equal subnets only</h2>
+    <p>
+      Every subnet here is the same size. Asking for a number that is not a power of two rounds up
+      &mdash; five subnets of a /24 need a /27, which makes eight &mdash; and the page says so, so
+      the spares are a decision rather than a surprise.
+    </p>
+
+    <h2>Big splits</h2>
+    <p>
+      A /8 cut into /32s is 16,777,216 rows. The table shows the first
+      {TABLE_LIMIT.toLocaleString("en-US")}, and Copy and CSV carry the first
+      {EXPORT_LIMIT.toLocaleString("en-US")}; the count above is always the true total. For IPv6
+      that matters more: a /48 already holds 65,536 /64s.
+    </p>
+
+    <h2>Usable hosts</h2>
+    <p>
+      An IPv4 subnet loses its network and broadcast addresses, except /31 (both addresses usable,
+      RFC 3021) and /32. IPv6 has no broadcast, so every address in the subnet counts, though the
+      first one is reserved as the subnet-router anycast address on many routers.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    blockSize,
+    cidrToRange,
+    formatAddress,
+    formatBig,
+    formatCidrText,
+    FAMILY_BITS,
+    parsePrefixed,
+    prefixForPieces,
+    splitCidr,
+    SPLIT_EXPORT_LIMIT as EXPORT_LIMIT,
+    SPLIT_TABLE_LIMIT as TABLE_LIMIT,
+    usableHosts,
+    type SplitResult,
+  } from "../../lib/iprange";
+  import { all, attachCopy, downloadText, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-split";
+
+  const parentInput = el<HTMLInputElement>("#parent");
+  const parentMeta = el<HTMLElement>("#parent-meta");
+  const byRadios = all<HTMLInputElement>('input[name="by"]');
+  const amount = el<HTMLInputElement>("#amount");
+  const amountLabel = el<HTMLElement>("#amount-label");
+  const amountHint = el<HTMLElement>("#amount-hint");
+  const errorBox = el<HTMLElement>("#split-error");
+  const rows = el<HTMLTableSectionElement>("#rows");
+  const tableMeta = el<HTMLElement>("#table-meta");
+
+  const values = new Map(all<HTMLElement>("[data-value]").map((n) => [n.dataset["value"]!, n]));
+  const notes = new Map(all<HTMLElement>("[data-note]").map((n) => [n.dataset["note"]!, n]));
+
+  const prefs = loadPrefs(PREFS_KEY, { parent: "", by: "count", count: "4", prefix: "26" });
+  if (typeof prefs.parent === "string" && prefs.parent.length > 0) parentInput.value = prefs.parent;
+  for (const radio of byRadios) radio.checked = radio.value === prefs.by;
+  if (!byRadios.some((r) => r.checked)) byRadios[0]!.checked = true;
+  // Each mode remembers its own number, so switching back does not lose it.
+  const remembered = { count: String(prefs.count), prefix: String(prefs.prefix) };
+
+  let current: SplitResult | null = null;
+  const by = () => byRadios.find((r) => r.checked)!.value as "count" | "prefix";
+
+  function set(id: string, value: string | null, note = ""): void {
+    const node = values.get(id)!;
+    node.textContent = value ?? "—";
+    if (value === null) node.dataset["empty"] = "true";
+    else delete node.dataset["empty"];
+    notes.get(id)!.textContent = note;
+  }
+
+  function clear(message: string | null): void {
+    current = null;
+    for (const id of values.keys()) set(id, null);
+    rows.replaceChildren();
+    tableMeta.textContent = "";
+    errorBox.hidden = message === null;
+    errorBox.textContent = message ?? "";
+  }
+
+  function cell(text: string, className?: string): HTMLTableCellElement {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (className) td.className = className;
+    return td;
+  }
+
+  function syncAmountField(): void {
+    const mode = by();
+    amountLabel.textContent = mode === "count" ? "How many subnets" : "Prefix length of each subnet";
+    amount.value = remembered[mode];
+  }
+
+  function run(): void {
+    const mode = by();
+    remembered[mode] = amount.value;
+    savePrefs(PREFS_KEY, { parent: parentInput.value, by: mode, ...remembered });
+
+    if (parentInput.value.trim().length === 0) {
+      parentMeta.textContent = "";
+      amountHint.textContent = "";
+      clear(null);
+      return;
+    }
+
+    try {
+      const parent = parsePrefixed(parentInput.value);
+      parentMeta.textContent = parent.hostBits
+        ? `host bits cleared — splitting ${formatCidrText(parent)}`
+        : parent.prefixAssumed
+          ? "no prefix given — that is a single address"
+          : `IPv${parent.family}`;
+
+      const bits = FAMILY_BITS[parent.family];
+      amount.max = mode === "prefix" ? String(bits) : "";
+      amount.min = mode === "prefix" ? String(parent.prefix) : "1";
+
+      const number = Number(amount.value);
+      if (!/^\d+$/.test(amount.value.trim())) {
+        amountHint.textContent = "";
+        clear(mode === "count" ? "Enter how many subnets you need." : "Enter a prefix length.");
+        return;
+      }
+
+      let prefix: number;
+      if (mode === "count") {
+        prefix = prefixForPieces(parent, number);
+        const made = 1n << BigInt(prefix - parent.prefix);
+        amountHint.textContent =
+          made === BigInt(number)
+            ? `Exactly ${formatBig(made)} × /${prefix}.`
+            : `Rounded up: /${prefix} makes ${formatBig(made)}, so ${formatBig(made - BigInt(number))} spare.`;
+      } else {
+        prefix = number;
+        amountHint.textContent = `Between /${parent.prefix} and /${bits}.`;
+      }
+
+      const result = splitCidr(parent, prefix, EXPORT_LIMIT);
+      current = result;
+      errorBox.hidden = true;
+
+      const sample = result.subnets[0]!;
+      set("parent", formatCidrText(parent), `${formatBig(blockSize(parent.family, parent.prefix))} addresses`);
+      set("prefix", `/${prefix}`, `${prefix - parent.prefix} bit${prefix - parent.prefix === 1 ? "" : "s"} borrowed`);
+      set("count", formatBig(result.count), result.truncated ? `listing the first ${formatBig(BigInt(EXPORT_LIMIT))}` : "");
+      set("size", formatBig(blockSize(parent.family, prefix)));
+      set(
+        "usable",
+        formatBig(usableHosts(sample)),
+        parent.family === 6 ? "no broadcast in IPv6" : prefix >= 31 ? "RFC 3021 / single host" : "minus network and broadcast",
+      );
+
+      const shown = result.subnets.slice(0, TABLE_LIMIT);
+      const fragment = document.createDocumentFragment();
+      shown.forEach((cidr, index) => {
+        const range = cidrToRange(cidr);
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.scope = "row";
+        th.className = "sheet__num";
+        th.textContent = String(index + 1);
+        tr.append(
+          th,
+          cell(formatCidrText(cidr), "sheet__key"),
+          cell(formatAddress(cidr.family, range.start)),
+          cell(formatAddress(cidr.family, range.end)),
+          cell(formatBig(usableHosts(cidr)), "sheet__num"),
+        );
+        fragment.append(tr);
+      });
+      rows.replaceChildren(fragment);
+      tableMeta.textContent =
+        result.count > BigInt(shown.length)
+          ? `showing ${formatBig(BigInt(shown.length))} of ${formatBig(result.count)}`
+          : `${formatBig(result.count)} rows`;
+    } catch (error) {
+      amountHint.textContent = "";
+      clear(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  parentInput.addEventListener("input", run);
+  amount.addEventListener("input", run);
+  for (const radio of byRadios) {
+    radio.addEventListener("change", () => {
+      syncAmountField();
+      run();
+    });
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      parentInput.value = button.dataset["preset"]!;
+      parentInput.focus();
+      run();
+    });
+  }
+
+  attachCopy(el<HTMLButtonElement>("#copy-all"), () =>
+    current ? current.subnets.map(formatCidrText).join("\n") : "",
+  );
+
+  el<HTMLButtonElement>("#download-csv").addEventListener("click", () => {
+    if (!current) return;
+    const lines = ["subnet,first,last,usable_hosts"];
+    for (const cidr of current.subnets) {
+      const range = cidrToRange(cidr);
+      lines.push(
+        [formatCidrText(cidr), formatAddress(cidr.family, range.start), formatAddress(cidr.family, range.end), String(usableHosts(cidr))].join(","),
+      );
+    }
+    downloadText("subnets.csv", lines.join("\n") + "\n");
+  });
+
+  syncAmountField();
+  run();
+</script>

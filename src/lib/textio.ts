@@ -10,6 +10,8 @@ export interface TextIoOptions {
   downloadName: string;
   /** Loaded by the Sample button; the button stays hidden when omitted. */
   sample?: string;
+  /** Called instead of `transform` when the input is emptied, to clear anything the page drew. */
+  onEmpty?: () => void;
   /**
    * Syntax colouring for both panes. Needs `<IoPanel highlight>`, which puts a
    * `<pre>` layer behind each textarea.
@@ -118,6 +120,7 @@ export function attachTextIo(options: TextIoOptions): TextIo {
     inputLayer?.paint(input.value);
 
     if (input.value.length === 0) {
+      options.onEmpty?.();
       render({ ok: true, output: "" });
       return;
     }

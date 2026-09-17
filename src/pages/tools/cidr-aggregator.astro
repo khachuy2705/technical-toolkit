@@ -1,0 +1,237 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+---
+
+<ToolLayout slug="cidr-aggregator">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <span class="field__label">Mode</span>
+        <div class="segmented" role="radiogroup" aria-label="Mode">
+          <label>
+            <input type="radio" name="mode" value="aggregate" checked />
+            <span>Aggregate</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="supernet" />
+            <span>Supernet</span>
+          </label>
+        </div>
+        <p class="field__hint" id="mode-hint"></p>
+      </div>
+    </div>
+  </section>
+
+  <IoPanel
+    inputLabel="Prefixes"
+    outputLabel="Result"
+    placeholder={"One prefix per line, or separated by commas:\n10.0.0.0/25\n10.0.0.128/25\n192.168.1.0 255.255.255.0\n2001:db8::/48"}
+    swappable
+  />
+
+  <section class="card" id="report" hidden>
+    <h2 class="card__title">What happened to the input</h2>
+    <ul class="report" id="report-list"></ul>
+  </section>
+
+  <section class="card prose">
+    <h2>Aggregate or supernet</h2>
+    <p>
+      <b>Aggregate</b> is lossless. Overlapping, duplicate and adjacent prefixes are merged, and the
+      result covers exactly the same addresses as the input in as few blocks as possible
+      &mdash; safe to paste into a firewall or a prefix list.
+    </p>
+    <p>
+      <b>Supernet</b> is the single shortest prefix that contains every input. It is what a route
+      summary advertises, and it is almost always larger than what you had: two /24s that are not
+      neighbours summarise to a /22 or wider. The page says how many addresses the supernet covers
+      that none of your prefixes did, because that surplus is where a summary route starts
+      attracting traffic it cannot deliver.
+    </p>
+
+    <h2>Input</h2>
+    <p>
+      IPv4 and IPv6 can be mixed; each family is handled on its own and IPv4 comes first. Prefixes
+      can be written <code>10.0.0.0/24</code>, <code>10.0.0.0/255.255.255.0</code> or
+      <code>10.0.0.0 255.255.255.0</code>; a bare address is a single-address prefix; and
+      <code>#</code> starts a comment. A prefix with host bits set, such as
+      <code>10.0.0.5/24</code>, is read as the network it belongs to and listed in the report, so
+      a typo does not vanish silently. Up to 10,000 entries are read.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    aggregate,
+    blockSize,
+    findRedundant,
+    formatBig,
+    formatCidrText,
+    parseCidrList,
+    supernet,
+    type Cidr,
+    type Family,
+    type ListEntry,
+  } from "../../lib/iprange";
+  import { fail, ok } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-aggregate";
+  const modeRadios = all<HTMLInputElement>('input[name="mode"]');
+  const modeHint = el<HTMLElement>("#mode-hint");
+  const report = el<HTMLElement>("#report");
+  const reportList = el<HTMLUListElement>("#report-list");
+
+  const prefs = loadPrefs(PREFS_KEY, { mode: "aggregate" });
+  for (const radio of modeRadios) radio.checked = radio.value === prefs.mode;
+  if (!modeRadios.some((r) => r.checked)) modeRadios[0]!.checked = true;
+
+  const HINTS: Record<string, string> = {
+    aggregate: "Lossless: the same addresses in the fewest blocks.",
+    supernet: "One prefix per address family that contains everything — usually more than you had.",
+  };
+
+  const showHint = () => {
+    modeHint.textContent = HINTS[modeRadios.find((r) => r.checked)!.value] ?? "";
+  };
+  showHint();
+
+  const REPORT_LIMIT = 50;
+
+  interface Line {
+    tone: "info" | "warn";
+    text: string;
+  }
+
+  function renderReport(lines: Line[]): void {
+    reportList.replaceChildren(
+      ...lines.map((line) => {
+        const li = document.createElement("li");
+        li.className = `report__item report__item--${line.tone}`;
+        li.textContent = line.text;
+        return li;
+      }),
+    );
+    report.hidden = lines.length === 0;
+  }
+
+  /** Lists the first few of a long set and says how many more there were. */
+  function some<T>(items: T[], describe: (item: T) => string): string {
+    const shown = items.slice(0, REPORT_LIMIT).map(describe).join("; ");
+    return items.length > REPORT_LIMIT ? `${shown}; and ${items.length - REPORT_LIMIT} more` : shown;
+  }
+
+  const byFamily = (entries: ListEntry[], family: Family): Cidr[] =>
+    entries.filter((e) => e.cidr.family === family).map((e) => e.cidr);
+
+  const SAMPLE = [
+    "# Adjacent halves merge into one /24",
+    "10.0.0.0/25",
+    "10.0.0.128/25",
+    "# Contained and duplicate prefixes disappear",
+    "172.16.0.0/12, 172.16.5.0/24, 172.16.0.0/12",
+    "# Host bits are cleared and reported",
+    "192.168.1.77/24",
+    "192.168.0.0 255.255.255.0",
+    "2001:db8::/49",
+    "2001:db8:0:8000::/49",
+  ].join("\n");
+
+  const io = attachTextIo({
+    downloadName: "prefixes.txt",
+    sample: SAMPLE,
+    onEmpty: () => renderReport([]),
+    transform(input) {
+      const mode = modeRadios.find((r) => r.checked)!.value;
+      savePrefs(PREFS_KEY, { mode });
+
+      const { entries, problems } = parseCidrList(input);
+      const lines: Line[] = [];
+
+      for (const problem of problems.slice(0, REPORT_LIMIT)) {
+        lines.push({ tone: "warn", text: `Line ${problem.line}, "${problem.text}": ${problem.message}` });
+      }
+      if (problems.length > REPORT_LIMIT) {
+        lines.push({ tone: "warn", text: `…and ${problems.length - REPORT_LIMIT} more lines that could not be read.` });
+      }
+
+      const shifted = entries.filter((e) => e.cidr.hostBits);
+      if (shifted.length > 0) {
+        lines.push({
+          tone: "warn",
+          text: `Host bits cleared: ${some(shifted, (e) => `line ${e.line} ${e.text} → ${formatCidrText(e.cidr)}`)}.`,
+        });
+      }
+
+      if (entries.length === 0) {
+        renderReport(lines);
+        return problems.length > 0 ? fail("No prefix in the input could be read; see the report below.") : ok("");
+      }
+
+      const output: string[] = [];
+      let note: string;
+
+      if (mode === "supernet") {
+        const parts: string[] = [];
+        for (const family of [4, 6] as const) {
+          const cidrs = byFamily(entries, family);
+          if (cidrs.length === 0) continue;
+          const summary = supernet(cidrs);
+          output.push(formatCidrText(summary.cidr));
+          const size = blockSize(family, summary.cidr.prefix);
+          if (summary.extra > 0n) {
+            // Percent to one decimal, computed in bigint so /0 does not overflow.
+            const tenths = (summary.extra * 1000n) / size;
+            lines.push({
+              tone: "warn",
+              text: `The IPv${family} supernet ${formatCidrText(summary.cidr)} covers ${formatBig(summary.extra)} addresses (${tenths / 10n}.${tenths % 10n}%) that none of the inputs did.`,
+            });
+          } else {
+            lines.push({ tone: "info", text: `The IPv${family} supernet ${formatCidrText(summary.cidr)} covers exactly the input, nothing more.` });
+          }
+          parts.push(`IPv${family}: ${cidrs.length} → 1`);
+        }
+        note = parts.join(" · ");
+      } else {
+        const redundant = findRedundant(entries);
+        if (redundant.duplicates.length > 0) {
+          lines.push({ tone: "info", text: `Duplicates removed: ${some(redundant.duplicates, (e) => `line ${e.line} ${e.text}`)}.` });
+        }
+        if (redundant.contained.length > 0) {
+          lines.push({
+            tone: "info",
+            text: `Already covered: ${some(redundant.contained, (x) => `line ${x.entry.line} ${x.entry.text} is inside ${x.within.text}`)}.`,
+          });
+        }
+        let before = 0;
+        for (const family of [4, 6] as const) {
+          const cidrs = byFamily(entries, family);
+          before += cidrs.length;
+          output.push(...aggregate(cidrs).map(formatCidrText));
+        }
+        const saved = before - output.length;
+        lines.push({
+          tone: "info",
+          text:
+            saved > 0
+              ? `${before} prefixes became ${output.length}; the address space is unchanged.`
+              : `Nothing could be merged: all ${before} prefixes are already distinct and non-adjacent.`,
+        });
+        note = `${before} → ${output.length}`;
+      }
+
+      renderReport(lines);
+      return ok(output.join("\n"), note);
+    },
+  });
+
+  for (const radio of modeRadios) {
+    radio.addEventListener("change", () => {
+      showHint();
+      io.run();
+    });
+  }
+</script>

@@ -10,6 +10,25 @@ import type { Lang } from './i18n';
 
 export type ToolStatus = 'live' | 'planned';
 
+export type ToolGroupId = 'network' | 'security' | 'data' | 'time';
+
+export interface ToolGroup {
+  readonly id: ToolGroupId;
+  readonly name: string;
+  readonly vi: string;
+}
+
+/**
+ * Display order of the groups. The home page renders one section per group,
+ * the header links to each, and tool pages show their group's siblings.
+ */
+export const TOOL_GROUPS: readonly ToolGroup[] = [
+  { id: 'network', name: 'Network', vi: 'Mạng' },
+  { id: 'security', name: 'Security', vi: 'Bảo mật' },
+  { id: 'data', name: 'Data formats', vi: 'Định dạng dữ liệu' },
+  { id: 'time', name: 'Date & time', vi: 'Ngày giờ' },
+];
+
 /** A tool's own words, in one language. */
 export interface ToolText {
   readonly name: string;
@@ -28,6 +47,7 @@ export interface Tool {
   /** Inner markup of a 24x24 stroked SVG. */
   readonly icon: string;
   readonly status: ToolStatus;
+  readonly group: ToolGroupId;
   /**
    * Vietnamese name and tagline, for pages rendered in Vietnamese. The
    * description is only needed for a tool whose own page is Vietnamese.
@@ -45,6 +65,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['password generator', 'random password', 'strong password', 'entropy'],
     icon: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
     status: 'live',
+    group: 'security',
     vi: { name: 'Tạo mật khẩu', tagline: 'Mật khẩu ngẫu nhiên, hiện độ mạnh tức thì.' },
   },
   {
@@ -56,6 +77,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['passphrase generator', 'diceware', 'eff wordlist', 'memorable password'],
     icon: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 8h.01"/><path d="M8 8h.01"/><path d="M8 16h.01"/><path d="M16 16h.01"/><path d="M12 12h.01"/>',
     status: 'live',
+    group: 'security',
     vi: { name: 'Tạo cụm mật khẩu', tagline: 'Cụm từ kiểu diceware, dễ nhớ.' },
   },
   {
@@ -67,6 +89,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['hash generator', 'md5', 'sha256', 'sha512', 'checksum'],
     icon: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
     status: 'live',
+    group: 'security',
     vi: { name: 'Tạo mã băm', tagline: 'MD5, SHA-256 và SHA-512 cho văn bản hoặc tệp.' },
   },
   {
@@ -78,7 +101,56 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['subnet calculator', 'cidr calculator', 'ipv4 subnet', 'netmask', 'network address'],
     icon: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
     status: 'live',
+    group: 'network',
     vi: { name: 'Tính subnet', tagline: 'Nhập IP và prefix, ra toàn bộ thông số mạng.' },
+  },
+  {
+    slug: 'ip-range-to-cidr',
+    name: 'IP Range to CIDR',
+    tagline: 'Any address range as the fewest prefixes.',
+    description:
+      'Convert IPv4 or IPv6 address ranges into the smallest list of CIDR blocks that covers them exactly, as prefixes, masks or ACL wildcards.',
+    keywords: ['ip range to cidr', 'range to cidr', 'cidr converter', 'ipv6 range to cidr', 'acl wildcard'],
+    icon: '<path d="M4 12h16"/><path d="m8 8-4 4 4 4"/><path d="m16 8 4 4-4 4"/>',
+    status: 'live',
+    group: 'network',
+    vi: { name: 'Đổi dải IP sang CIDR', tagline: 'Một dải địa chỉ thành ít prefix nhất.' },
+  },
+  {
+    slug: 'cidr-aggregator',
+    name: 'CIDR Aggregator',
+    tagline: 'Merge a prefix list, or find its supernet.',
+    description:
+      'Merge overlapping and adjacent IPv4 or IPv6 prefixes into the fewest CIDR blocks, or summarise them into one supernet and see exactly how much extra space it covers.',
+    keywords: ['cidr aggregator', 'supernet calculator', 'route summarization', 'merge cidr', 'ip list consolidation'],
+    icon: '<path d="M4 6h6"/><path d="M4 12h6"/><path d="M4 18h6"/><path d="M10 6c4 0 4 6 8 6"/><path d="M10 18c4 0 4-6 8-6"/><path d="M10 12h10"/>',
+    status: 'live',
+    group: 'network',
+    vi: { name: 'Gộp CIDR', tagline: 'Gộp danh sách prefix, hoặc tìm supernet.' },
+  },
+  {
+    slug: 'cidr-splitter',
+    name: 'CIDR Splitter',
+    tagline: 'Cut a network into equal subnets.',
+    description:
+      'Split an IPv4 or IPv6 network into equal subnets, by count or by prefix length, with every subnet listed and exportable as CSV.',
+    keywords: ['cidr splitter', 'subnet splitter', 'divide network', 'ipv6 subnetting', 'subnet list'],
+    icon: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/><path d="M3 12h18"/>',
+    status: 'live',
+    group: 'network',
+    vi: { name: 'Chia CIDR', tagline: 'Chia một mạng thành các subnet bằng nhau.' },
+  },
+  {
+    slug: 'ipv6-calculator',
+    name: 'IPv6 Calculator',
+    tagline: 'Prefix, range, type and reverse DNS for IPv6.',
+    description:
+      'Work out the network, address range and size of any IPv6 prefix, with the RFC 5952 canonical and expanded forms, address type, embedded IPv4, EUI-64 MAC and ip6.arpa name.',
+    keywords: ['ipv6 calculator', 'ipv6 subnet calculator', 'ipv6 prefix', 'ipv6 compress', 'ip6.arpa'],
+    icon: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20"/><path d="M12 2a15 15 0 0 0 0 20"/>',
+    status: 'live',
+    group: 'network',
+    vi: { name: 'Tính IPv6', tagline: 'Prefix, dải địa chỉ, loại và reverse DNS cho IPv6.' },
   },
   {
     slug: 'epoch-converter',
@@ -95,6 +167,7 @@ export const TOOLS: readonly Tool[] = [
     ],
     icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
     status: 'live',
+    group: 'time',
     vi: { name: 'Đổi epoch', tagline: 'Đổi Unix time sang ngày giờ và ngược lại.' },
   },
   {
@@ -113,6 +186,7 @@ export const TOOLS: readonly Tool[] = [
     ],
     icon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
     status: 'live',
+    group: 'time',
     vi: {
       name: 'Đổi lịch âm dương',
       tagline: 'Âm lịch sang dương lịch và ngược lại, theo lịch Việt Nam.',
@@ -128,6 +202,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['uuid', 'guid', 'identifier'],
     icon: '<path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 12h8"/>',
     status: 'planned',
+    group: 'data',
     vi: { name: 'Tạo UUID', tagline: 'Mã định danh v4 và v7, tạo hàng loạt.' },
   },
   {
@@ -139,6 +214,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['base64', 'encode', 'decode', 'base64url'],
     icon: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
     status: 'live',
+    group: 'data',
     vi: { name: 'Mã hoá Base64', tagline: 'Mã hoá và giải mã, giữ đúng tiếng Việt có dấu.' },
   },
   {
@@ -150,6 +226,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['json formatter', 'json beautifier', 'json validator', 'minify json'],
     icon: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>',
     status: 'live',
+    group: 'data',
     vi: { name: 'Định dạng JSON', tagline: 'Làm đẹp, rút gọn và kiểm tra JSON.' },
   },
   {
@@ -161,6 +238,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['yaml formatter', 'yaml to json', 'json to yaml', 'yaml validator'],
     icon: '<path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="m8 9 4 4 4-4"/><path d="M12 13v4"/>',
     status: 'live',
+    group: 'data',
     vi: { name: 'Định dạng YAML', tagline: 'Chỉnh YAML, hoặc chuyển qua lại với JSON.' },
   },
   {
@@ -171,11 +249,20 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['jwt', 'json web token', 'decode'],
     icon: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
     status: 'planned',
+    group: 'security',
     vi: { name: 'Giải mã JWT', tagline: 'Xem header, payload và thời hạn.' },
   },
 ];
 
 export const LIVE_TOOLS = TOOLS.filter((t) => t.status === 'live');
+
+export function liveToolsIn(group: ToolGroupId): Tool[] {
+  return LIVE_TOOLS.filter((t) => t.group === group);
+}
+
+export function groupById(id: ToolGroupId): ToolGroup {
+  return TOOL_GROUPS.find((g) => g.id === id)!;
+}
 export const PLANNED_TOOLS = TOOLS.filter((t) => t.status === 'planned');
 
 export function toolBySlug(slug: string): Tool {

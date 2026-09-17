@@ -1,0 +1,139 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+---
+
+<ToolLayout slug="ip-range-to-cidr">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <span class="field__label">Write each block as</span>
+        <div class="segmented" role="radiogroup" aria-label="Output style">
+          <label>
+            <input type="radio" name="style" value="cidr" checked />
+            <span>CIDR</span>
+          </label>
+          <label>
+            <input type="radio" name="style" value="mask" />
+            <span>Address + mask</span>
+          </label>
+          <label>
+            <input type="radio" name="style" value="wildcard" />
+            <span>ACL wildcard</span>
+          </label>
+        </div>
+        <p class="field__hint">Masks and wildcards are IPv4 only; IPv6 blocks stay as prefixes.</p>
+      </div>
+
+      <div class="field">
+        <span class="field__label">Separate blocks with</span>
+        <div class="segmented" role="radiogroup" aria-label="Separator">
+          <label>
+            <input type="radio" name="joiner" value="newline" checked />
+            <span>New line</span>
+          </label>
+          <label>
+            <input type="radio" name="joiner" value="comma" />
+            <span>Comma</span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <IoPanel
+    inputLabel="Ranges"
+    outputLabel="CIDR blocks"
+    placeholder={"One range per line:\n10.0.0.5 - 10.0.3.200\n192.168.1.10–192.168.1.20\n2001:db8::1 to 2001:db8::ff"}
+  />
+
+  <section class="card prose">
+    <h2>What the input can look like</h2>
+    <p>
+      One range per line, with the two ends separated by a spaced hyphen, an en dash or the word
+      <code>to</code>: <code>10.0.0.5 - 10.0.3.200</code>, <code>10.0.0.5–10.0.3.200</code>,
+      <code>2001:db8::1 to 2001:db8::ff</code>. A bare hyphen works for IPv4. A line with a single
+      address or a CIDR is its own range, and <code>#</code> starts a comment.
+    </p>
+
+    <h2>Why a range becomes several blocks</h2>
+    <p>
+      A CIDR block always starts on a power-of-two boundary, and a range rarely does.
+      <code>192.168.0.1 – 192.168.0.6</code> needs four: <code>.1/32</code>, <code>.2/31</code>,
+      <code>.4/31</code> and <code>.6/32</code>. The list here is the shortest one possible &mdash;
+      each block is as large as its start address allows without running past the end &mdash; and
+      it covers the range exactly, with nothing extra. The suite checks that against brute force for
+      every one of the 32,896 ranges inside a /24.
+    </p>
+
+    <h2>ACL wildcards</h2>
+    <p>
+      A wildcard is the subnet mask inverted: <code>0.0.0.255</code> for a /24. Cisco IOS access
+      lists and OSPF network statements take it in that position. A single address comes out as
+      <code>10.0.0.1 0.0.0.0</code>; some platforms also accept <code>host 10.0.0.1</code> for the
+      same thing.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    formatBig,
+    formatBlock,
+    parseRange,
+    rangeSize,
+    rangeToCidrs,
+    type BlockStyle,
+  } from "../../lib/iprange";
+  import { fail, ok } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { all, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-range";
+  const styleRadios = all<HTMLInputElement>('input[name="style"]');
+  const joinerRadios = all<HTMLInputElement>('input[name="joiner"]');
+
+  const prefs = loadPrefs(PREFS_KEY, { style: "cidr", joiner: "newline" });
+  for (const radio of styleRadios) radio.checked = radio.value === prefs.style;
+  for (const radio of joinerRadios) radio.checked = radio.value === prefs.joiner;
+  if (!styleRadios.some((r) => r.checked)) styleRadios[0]!.checked = true;
+  if (!joinerRadios.some((r) => r.checked)) joinerRadios[0]!.checked = true;
+
+  const picked = (radios: HTMLInputElement[]) => radios.find((r) => r.checked)!.value;
+
+  const SAMPLE = "10.0.0.5 - 10.0.3.200\n192.168.1.10 - 192.168.1.20\n2001:db8::1 to 2001:db8::ff";
+
+  const io = attachTextIo({
+    downloadName: "cidr-blocks.txt",
+    sample: SAMPLE,
+    transform(input) {
+      const style = picked(styleRadios) as BlockStyle;
+      const joiner = picked(joinerRadios);
+      savePrefs(PREFS_KEY, { style, joiner });
+
+      const blocks: string[] = [];
+      let ranges = 0;
+      let addresses = 0n;
+      const lines = input.split("\n");
+      for (let i = 0; i < lines.length; i += 1) {
+        const text = lines[i]!.replace(/#.*/, "").trim();
+        if (text.length === 0) continue;
+        try {
+          const range = parseRange(text);
+          ranges += 1;
+          addresses += rangeSize(range);
+          for (const cidr of rangeToCidrs(range)) blocks.push(formatBlock(cidr, style));
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          return fail(`Line ${i + 1}: ${reason}`);
+        }
+      }
+      if (ranges === 0) return ok("");
+
+      const note = `${ranges} range${ranges === 1 ? "" : "s"} → ${blocks.length} block${blocks.length === 1 ? "" : "s"}, ${formatBig(addresses)} address${addresses === 1n ? "" : "es"}`;
+      return ok(blocks.join(joiner === "comma" ? ", " : "\n"), note);
+    },
+  });
+
+  for (const radio of [...styleRadios, ...joinerRadios]) radio.addEventListener("change", io.run);
+</script>

@@ -35,7 +35,7 @@ export const CHROME: Record<Lang, ChromeText> = {
     footerNote: "Everything runs in your browser. No data leaves this page.",
     breadcrumb: "Breadcrumb",
     breadcrumbHome: "Tools",
-    privacyBadge: "Generated locally with your browser’s crypto API. Nothing is sent anywhere.",
+    privacyBadge: "Runs entirely in your browser. Nothing you enter is sent anywhere.",
     moreTools: "More tools",
     planned: "Planned",
     themePrefix: "Colour theme",

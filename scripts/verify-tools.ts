@@ -48,6 +48,40 @@ import {
   toBinary,
 } from "../src/lib/ipv4";
 import {
+  classifyIpv6,
+  describeIpv6,
+  eui64Mac,
+  embeddedIpv4,
+  expandIpv6,
+  formatCount,
+  formatIpv6,
+  ip6Arpa,
+  IPV6_MAX,
+  ipv6Binary,
+  ipv6Mask,
+  parseIpv6,
+  parseIpv6Cidr,
+} from "../src/lib/ipv6";
+import {
+  aggregate,
+  allOnes,
+  blockSize,
+  cidrToRange,
+  findRedundant,
+  formatBlock,
+  formatCidrText,
+  parseCidrList,
+  parsePrefixed,
+  parseRange,
+  prefixForPieces,
+  prefixMask,
+  rangeToCidrs,
+  splitCidr,
+  supernet,
+  usableHosts,
+  type Cidr,
+} from "../src/lib/iprange";
+import {
   dayCanChi,
   eraOffset,
   formatDmy,
@@ -890,6 +924,250 @@ export async function runToolChecks(check: Check): Promise<void> {
     const t0 = performance.now();
     highlightJson(big);
     console.log(`     ${big.length.toLocaleString("en-US")} characters highlighted in ${(performance.now() - t0).toFixed(1)} ms`);
+  }
+
+  console.log("\n-- ipv6 --");
+  {
+    // RFC 5952 §4 and the cases that catch compressors that are merely plausible.
+    const CANONICAL: readonly [string, string][] = [
+      ["2001:db8:0:0:0:0:2:1", "2001:db8::2:1"],
+      ["2001:0db8:0000:0000:0000:0000:0000:0001", "2001:db8::1"],
+      ["2001:db8:0:1:1:1:1:1", "2001:db8:0:1:1:1:1:1"],
+      ["2001:0:0:1:0:0:0:1", "2001:0:0:1::1"],
+      ["2001:db8:0:0:1:0:0:1", "2001:db8::1:0:0:1"],
+      ["2001:DB8::ABCD", "2001:db8::abcd"],
+      ["0:0:0:0:0:0:0:1", "::1"],
+      ["0:0:0:0:0:0:0:0", "::"],
+      ["1:0:0:0:0:0:0:0", "1::"],
+      ["::ffff:192.0.2.1", "::ffff:192.0.2.1"],
+      ["::ffff:c000:201", "::ffff:192.0.2.1"],
+      ["1:2:3:4:5:6:1.2.3.4", "1:2:3:4:5:6:102:304"],
+      ["[2001:db8::1]", "2001:db8::1"],
+    ];
+    for (const [input, expected] of CANONICAL) {
+      const actual = formatIpv6(parseIpv6(input).value);
+      check(`${input} is written ${expected}`, actual === expected, actual);
+    }
+    check("expanded form has eight four-digit groups", expandIpv6(parseIpv6("2001:db8::1").value) === "2001:0db8:0000:0000:0000:0000:0000:0001");
+    check("a zone is stripped and reported", parseIpv6("fe80::1%eth0").zone === "eth0" && formatIpv6(parseIpv6("fe80::1%eth0").value) === "fe80::1");
+
+    const BAD6 = ["2001:db8::1::1", "2001:db8:::1", "12345::", "g::1", "1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7::8", ":1:2:3:4:5:6:7", "1.2.3.4", "fe80::1%", "::1.2.3.256", "", "2001:db8::/64"];
+    let refused6 = 0;
+    for (const bad of BAD6) {
+      try { parseIpv6(bad); } catch { refused6 += 1; }
+    }
+    check("refuses malformed IPv6 addresses", refused6 === BAD6.length, `${refused6}/${BAD6.length}`);
+
+    // Round trip through both text forms, over values with long zero runs.
+    let roundTrip: string | null = null;
+    for (let n = 0; n < 2000 && roundTrip === null; n += 1) {
+      let value = 0n;
+      for (let g = 0; g < 8; g += 1) {
+        const group = (n * 2654435761 + g * 40503) % 7 < 3 ? 0n : BigInt(((n + 1) * (g + 3) * 9973) & 0xffff);
+        value = (value << 16n) | group;
+      }
+      const viaCanonical = parseIpv6(formatIpv6(value)).value;
+      const viaExpanded = parseIpv6(expandIpv6(value)).value;
+      if (viaCanonical !== value || viaExpanded !== value) roundTrip = expandIpv6(value);
+    }
+    check("canonical and expanded forms round-trip", roundTrip === null, roundTrip ?? "");
+
+    const KINDS6: readonly [string, string][] = [
+      ["::", "Unspecified"], ["::1", "Loopback"], ["2001:db8::1", "Documentation"],
+      ["3fff::1", "Documentation"], ["fe80::1", "Link-local"], ["fd12:3456::1", "Unique local"],
+      ["ff02::1", "Multicast"], ["2606:4700::1111", "Global unicast"], ["2002:c000:204::1", "6to4"],
+      ["2001:0:4136:e378:8000:63bf:3fff:fdd2", "Teredo"], ["64:ff9b::192.0.2.33", "NAT64"],
+      ["::ffff:10.0.0.1", "IPv4-mapped"], ["4000::1", "Reserved"],
+    ];
+    for (const [address, label] of KINDS6) {
+      const actual = classifyIpv6(parseIpv6(address).value).label;
+      check(`${address} is ${label}`, actual === label, actual);
+    }
+
+    check("6to4 carries its IPv4 address", embeddedIpv4(parseIpv6("2002:c000:204::1").value)?.address === "192.0.2.4");
+    // RFC 4380's own example: client 192.0.2.45, stored inverted as 3fff:fdd2.
+    check("Teredo stores the client address inverted", embeddedIpv4(parseIpv6("2001:0:4136:e378:8000:63bf:3fff:fdd2").value)?.address === "192.0.2.45", embeddedIpv4(parseIpv6("2001:0:4136:e378:8000:63bf:3fff:fdd2").value)?.address ?? "");
+    check("NAT64 carries its IPv4 address", embeddedIpv4(parseIpv6("64:ff9b::c000:221").value)?.address === "192.0.2.33");
+    check("a global address carries none", embeddedIpv4(parseIpv6("2606:4700::1111").value) === null);
+
+    check("EUI-64 gives back the MAC, U/L bit restored", eui64Mac(parseIpv6("fe80::21a:2bff:fe3c:4d5e").value) === "00:1a:2b:3c:4d:5e", String(eui64Mac(parseIpv6("fe80::21a:2bff:fe3c:4d5e").value)));
+    check("no MAC without the ff:fe marker", eui64Mac(parseIpv6("fe80::1").value) === null);
+
+    // RFC 3596 §2.5's own example.
+    check("ip6.arpa name matches RFC 3596", ip6Arpa(parseIpv6("4321:0:1:2:3:4:567:89ab").value) === "b.a.9.8.7.6.5.0.4.0.0.0.3.0.0.0.2.0.0.0.1.0.0.0.0.0.0.0.1.2.3.4.ip6.arpa");
+    check("a /32 zone has eight nibbles", ip6Arpa(parseIpv6("2001:db8::").value, 8) === "8.b.d.0.1.0.0.2.ip6.arpa");
+
+    const net = describeIpv6(parseIpv6("2001:db8::1").value, 64);
+    check("network of a /64", formatIpv6(net.network) === "2001:db8::");
+    check("last address of a /64", formatIpv6(net.last) === "2001:db8::ffff:ffff:ffff:ffff", formatIpv6(net.last));
+    check("a /64 is 2^64 addresses and one /64", formatCount(net.total) === "2^64" && net.subnets64 === 1n);
+    check("a /48 holds 65,536 /64s", describeIpv6(0n, 48).subnets64 === 65536n);
+    check("a /128 holds one address and no /64", describeIpv6(1n, 128).total === 1n && describeIpv6(1n, 128).subnets64 === null);
+    check("the /64 mask", formatIpv6(ipv6Mask(64)) === "ffff:ffff:ffff:ffff::");
+    check("/0 and /128 masks", ipv6Mask(0) === 0n && ipv6Mask(128) === IPV6_MAX);
+    check("small counts are written out", formatCount(65536n) === "65,536");
+    check("a bare address is /128 and says so", (() => { const r = parseIpv6Cidr("2001:db8::1"); return r.prefix === 128 && r.prefixAssumed; })());
+    let bad129 = false;
+    try { parseIpv6Cidr("::/129"); } catch { bad129 = true; }
+    check("refuses /129", bad129);
+    check("binary view has eight 16-bit groups", ipv6Binary(1n).split(".").length === 8 && ipv6Binary(1n).endsWith("0000000000000001"));
+  }
+
+  console.log("\n-- range to CIDR --");
+  {
+    const cidrs = (text: string) => rangeToCidrs(parseRange(text)).map(formatCidrText).join(" ");
+
+    check("a whole /24", cidrs("192.168.1.0 - 192.168.1.255") === "192.168.1.0/24", cidrs("192.168.1.0 - 192.168.1.255"));
+    check("an odd range splits at the alignment boundaries", cidrs("192.168.0.1 - 192.168.0.6") === "192.168.0.1/32 192.168.0.2/31 192.168.0.4/31 192.168.0.6/32", cidrs("192.168.0.1 - 192.168.0.6"));
+    check("the whole IPv4 space is /0", cidrs("0.0.0.0 - 255.255.255.255") === "0.0.0.0/0");
+    check("the whole IPv6 space is ::/0", cidrs(":: to ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff") === "::/0");
+    check("an IPv6 range", cidrs("2001:db8::1 - 2001:db8::7") === "2001:db8::1/128 2001:db8::2/127 2001:db8::4/126", cidrs("2001:db8::1 - 2001:db8::7"));
+
+    check("en dash, 'to' and a bare hyphen all work", ["10.0.0.0–10.0.0.3", "10.0.0.0 to 10.0.0.3", "10.0.0.0-10.0.0.3", "10.0.0.0 - 10.0.0.3"].every((t) => cidrs(t) === "10.0.0.0/30"));
+    check("a CIDR is its own range", cidrs("10.1.2.3/24") === "10.1.2.0/24");
+    check("a single address is a /32", cidrs("10.1.2.3") === "10.1.2.3/32");
+
+    const REFUSED: readonly [string, RegExp][] = [
+      ["10.0.0.9 - 10.0.0.1", /comes after/],
+      ["10.0.0.1 - 2001:db8::1", /starts in IPv4 and ends in IPv6/],
+      ["10.0.0.1 - 10.0.0.2 - 10.0.0.3", /more than two ends/],
+      ["", /Enter a range/],
+    ];
+    for (const [text, message] of REFUSED) {
+      let said = "";
+      try { parseRange(text); } catch (error) { said = (error as Error).message; }
+      check(`refuses ${JSON.stringify(text)} by name`, message.test(said), said || "(accepted)");
+    }
+
+    // Every range inside a /24 against a dynamic-programming optimum: the
+    // blocks must tile the range exactly, each must be a real prefix, and
+    // there must be no cover with fewer.
+    const base = 10n << 24n;
+    let wrong: string | null = null;
+    for (let end = 0; end < 256 && wrong === null; end += 1) {
+      const best = new Array<number>(end + 2).fill(0);
+      for (let s = end; s >= 0; s -= 1) {
+        let min = Infinity;
+        for (let k = 0; k <= 8; k += 1) {
+          const size = 1 << k;
+          if (s % size !== 0 || s + size - 1 > end) continue;
+          min = Math.min(min, 1 + best[s + size]!);
+        }
+        best[s] = min;
+      }
+      for (let start = 0; start <= end && wrong === null; start += 1) {
+        const blocks = rangeToCidrs({ family: 4, start: base + BigInt(start), end: base + BigInt(end) });
+        let cursor = base + BigInt(start);
+        for (const block of blocks) {
+          const aligned = (block.network & ~prefixMask(4, block.prefix) & allOnes(4)) === 0n;
+          if (block.network !== cursor || !aligned) wrong = `${start}-${end}: bad tiling at ${formatCidrText(block)}`;
+          cursor += blockSize(4, block.prefix);
+        }
+        if (wrong === null && cursor !== base + BigInt(end) + 1n) wrong = `${start}-${end}: stops at ${cursor - base}`;
+        if (wrong === null && blocks.length !== best[start]) wrong = `${start}-${end}: ${blocks.length} blocks, optimum ${best[start]}`;
+      }
+    }
+    check("all 32,896 ranges in a /24 are tiled exactly and minimally", wrong === null, wrong ?? "");
+  }
+
+  console.log("\n-- aggregate and supernet --");
+  {
+    const list = (text: string) => parseCidrList(text).entries.map((e) => e.cidr);
+    const agg = (text: string) => aggregate(list(text)).map(formatCidrText).join(" ");
+
+    check("two halves make a whole", agg("10.0.0.0/25, 10.0.0.128/25") === "10.0.0.0/24", agg("10.0.0.0/25, 10.0.0.128/25"));
+    check("three /24s make a /23 and a /24", agg("192.168.0.0/24\n192.168.1.0/24\n192.168.2.0/24") === "192.168.0.0/23 192.168.2.0/24");
+    check("contained and duplicate prefixes vanish", agg("10.0.0.0/8 10.1.0.0/16 10.0.0.0/8") === "10.0.0.0/8");
+    check("non-adjacent halves stay apart", agg("10.0.0.128/25 10.0.1.0/25") === "10.0.0.128/25 10.0.1.0/25", agg("10.0.0.128/25 10.0.1.0/25"));
+    check("IPv6 aggregates too", agg("2001:db8::/49 2001:db8:0:8000::/49") === "2001:db8::/48", agg("2001:db8::/49 2001:db8:0:8000::/49"));
+
+    // Random lists inside a /22: the address set must not change, and the
+    // result must already be as aggregated as it gets.
+    let drift: string | null = null;
+    for (let n = 0; n < 400 && drift === null; n += 1) {
+      const inputs: Cidr[] = [];
+      for (let i = 0; i < 1 + (n % 9); i += 1) {
+        const prefix = 23 + ((n * 7 + i * 3) % 10);
+        const offset = BigInt(((n + 1) * (i + 5) * 131) % 1024);
+        inputs.push({ family: 4, network: ((10n << 24n) + offset) & prefixMask(4, prefix), prefix });
+      }
+      const members = (cidrs: readonly Cidr[]) => {
+        const set = new Uint8Array(2048);
+        for (const c of cidrs) {
+          const r = cidrToRange(c);
+          for (let a = r.start; a <= r.end; a += 1n) set[Number(a - (10n << 24n))] = 1;
+        }
+        return set.join("");
+      };
+      const out = aggregate(inputs);
+      if (members(out) !== members(inputs)) drift = `address set changed for ${inputs.map(formatCidrText).join(",")}`;
+      else if (aggregate(out).map(formatCidrText).join() !== out.map(formatCidrText).join()) drift = `not idempotent for ${inputs.map(formatCidrText).join(",")}`;
+    }
+    check("aggregation never changes the address set, and is idempotent", drift === null, drift ?? "");
+
+    const sn = supernet(list("192.168.0.0/24 192.168.3.0/24"));
+    check("supernet of .0 and .3 is a /22", formatCidrText(sn.cidr) === "192.168.0.0/22", formatCidrText(sn.cidr));
+    check("and it says 512 addresses were not asked for", sn.extra === 512n, String(sn.extra));
+    check("a single prefix is its own supernet", formatCidrText(supernet(list("10.1.0.0/16")).cidr) === "10.1.0.0/16" && supernet(list("10.1.0.0/16")).extra === 0n);
+    check("10/8 and 11/8 summarise to 10.0.0.0/7", formatCidrText(supernet(list("10.0.0.0/8 11.0.0.0/8")).cidr) === "10.0.0.0/7");
+    check("opposite ends of the space summarise to /0", formatCidrText(supernet(list("0.0.0.0, 255.255.255.255")).cidr) === "0.0.0.0/0");
+    // Documented reading: a valid mask after a space belongs to the address
+    // before it, as in router config — so this is one host route, not two hosts.
+    check("'address mask' on one line is one entry", list("10.0.0.1 255.255.255.255").map(formatCidrText).join() === "10.0.0.1/32");
+    check("IPv6 supernet", formatCidrText(supernet(list("2001:db8::/48 2001:db8:1::/48")).cidr) === "2001:db8::/47");
+
+    const parsed = parseCidrList("10.0.0.0/8 192.168.0.0/16 # two on a line\n172.16.0.0 255.240.0.0\n\n10.0.0.5/24, bogus\n2001:db8::/32;fe80::/10");
+    check("a mask after a space belongs to its address", parsed.entries.some((e) => formatCidrText(e.cidr) === "172.16.0.0/12"));
+    check("but a prefix after a space is its own entry", parsed.entries.length === 6, parsed.entries.map((e) => e.text).join(" | "));
+    check("host bits are cleared and flagged", parsed.entries.some((e) => e.text === "10.0.0.5/24" && e.cidr.hostBits && formatCidrText(e.cidr) === "10.0.0.0/24"));
+    check("bad entries are reported with their line", parsed.problems.length === 1 && parsed.problems[0]!.line === 4 && parsed.problems[0]!.text === "bogus", JSON.stringify(parsed.problems));
+    check("the entry limit is enforced and reported", (() => { const r = parseCidrList("10.0.0.0/8\n".repeat(5), 3); return r.entries.length === 3 && r.problems.length === 1; })());
+  }
+
+  console.log("\n-- network helpers --");
+  {
+    const c = parsePrefixed("10.1.2.0/24");
+    check("block as CIDR", formatBlock(c, "cidr") === "10.1.2.0/24");
+    check("block as address and mask", formatBlock(c, "mask") === "10.1.2.0 255.255.255.0");
+    check("block as ACL wildcard", formatBlock(c, "wildcard") === "10.1.2.0 0.0.0.255");
+    check("a /32 wildcard is all zeros", formatBlock(parsePrefixed("10.1.2.3"), "wildcard") === "10.1.2.3 0.0.0.0");
+    check("IPv6 is always a prefix", formatBlock(parsePrefixed("2001:db8::/32"), "mask") === "2001:db8::/32");
+
+    check("usable hosts: /24 is 254", usableHosts(c) === 254n);
+    check("usable hosts: /31 and /32 per RFC 3021", usableHosts(parsePrefixed("10.0.0.0/31")) === 2n && usableHosts(parsePrefixed("10.0.0.0/32")) === 1n);
+    check("usable hosts: IPv6 has no broadcast to lose", usableHosts(parsePrefixed("2001:db8::/126")) === 4n);
+
+    const red = findRedundant(
+      parseCidrList(
+        ["10.0.0.0/8", "10.1.0.0/16", "192.168.0.0/24", "10.0.0.0/8", "2001:db8::/32", "2001:db8:1::/48", "192.168.1.0/24"].join("\n"),
+      ).entries,
+    );
+    check("a repeated prefix is a duplicate", red.duplicates.length === 1 && red.duplicates[0]!.line === 4, JSON.stringify(red.duplicates.map((d) => d.line)));
+    check("a prefix inside another is reported with its container", red.contained.length === 2 && red.contained.some((x) => x.entry.text === "10.1.0.0/16" && x.within.text === "10.0.0.0/8") && red.contained.some((x) => x.entry.text === "2001:db8:1::/48"), JSON.stringify(red.contained.map((x) => [x.entry.text, x.within.text])));
+    check("neighbours are not redundant", !red.contained.some((x) => x.entry.text === "192.168.1.0/24"));
+  }
+
+  console.log("\n-- split --");
+  {
+    const parent = parsePrefixed("10.0.0.0/24");
+    const quarters = splitCidr(parent, 26, 100);
+    check("a /24 splits into four /26s", quarters.subnets.map(formatCidrText).join(" ") === "10.0.0.0/26 10.0.0.64/26 10.0.0.128/26 10.0.0.192/26");
+    check("five pieces round up to eight (/27)", prefixForPieces(parent, 5) === 27);
+    check("one piece is the parent itself", prefixForPieces(parent, 1) === 24);
+    check("exactly 256 pieces is /32", prefixForPieces(parent, 256) === 32);
+    let tooMany = "";
+    try { prefixForPieces(parent, 257); } catch (error) { tooMany = (error as Error).message; }
+    check("257 pieces of a /24 is refused by name", /at most 256/.test(tooMany), tooMany);
+    let shorter = "";
+    try { splitCidr(parent, 23, 10); } catch (error) { shorter = (error as Error).message; }
+    check("a shorter prefix is refused", /from \/24 to \/32/.test(shorter), shorter);
+
+    const huge = splitCidr(parsePrefixed("10.0.0.0/8"), 32, 4096);
+    check("a /8 into /32s counts all 16,777,216 but lists 4,096", huge.count === 16777216n && huge.subnets.length === 4096 && huge.truncated);
+    check("the listed ones are the first ones", formatCidrText(huge.subnets[4095]!) === "10.0.15.255/32");
+    const v6 = splitCidr(parsePrefixed("2001:db8::/48"), 64, 3);
+    check("a /48 holds 65,536 /64s", v6.count === 65536n && v6.subnets.map(formatCidrText).join(" ") === "2001:db8::/64 2001:db8:0:1::/64 2001:db8:0:2::/64", v6.subnets.map(formatCidrText).join(" "));
+    check("not truncated when everything fits", !quarters.truncated && quarters.count === 4n);
   }
 
   console.log("\n-- yaml --");

@@ -70,6 +70,8 @@ src/
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── ipv4.ts            Address parsing and subnet arithmetic
+│   ├── ipv6.ts            IPv6 parsing, RFC 5952 text, types, ip6.arpa (bigint)
+│   ├── iprange.ts         Range→CIDR, aggregate, supernet, split — both families
 │   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
@@ -90,7 +92,8 @@ src/
 │                          JSON-LD, "more tools" footer
 │
 ├── components/            Presentational. No tool-specific logic.
-│   ├── Header.astro       Nav generated from the registry
+│   ├── Header.astro       Links to the four tool groups on the home page
+│   ├── ToolGroupNav.astro Sibling strip at the top of every tool page
 │   ├── Footer.astro
 │   ├── ThemeToggle.astro  Self-contained: markup + style + script
 │   ├── Icon.astro         Renders 24×24 stroked SVG from path data
@@ -101,7 +104,7 @@ src/
 │   └── IoPanel.astro      Input/output textareas for the text tools
 │
 ├── pages/
-│   ├── index.astro        Grid generated from the registry
+│   ├── index.astro        One grid per tool group, from the registry
 │   ├── about.astro        How it works, where randomness comes from
 │   ├── privacy.astro      What is stored (theme + settings) and what is not
 │   ├── 404.astro
@@ -115,14 +118,18 @@ src/
 │       ├── json-formatter.astro
 │       ├── yaml-formatter.astro
 │       ├── subnet-calculator.astro
+│       ├── ip-range-to-cidr.astro
+│       ├── cidr-aggregator.astro
+│       ├── cidr-splitter.astro
+│       ├── ipv6-calculator.astro
 │       ├── epoch-converter.astro
 │       └── lunar-calendar.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 2702 lines of logic in `lib/`, 582 of components and layouts, 3207 of pages, 1654 of
-CSS, 1221 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 3664 lines of logic in `lib/`, 681 of components and layouts, 4278 of pages, 1877 of
+CSS, 1563 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -170,17 +177,21 @@ interface Tool {
   keywords: readonly string[];
   icon: string;         // inner markup of a 24×24 stroked SVG
   status: 'live' | 'planned';
+  group: 'network' | 'security' | 'data' | 'time';
   vi: { name: string; tagline: string; description?: string };  // see "Page language" below
 }
 ```
+
+`TOOL_GROUPS` fixes the order and the display names (English and Vietnamese) of the four groups.
 
 Everything derives from it:
 
 | Consumer | Uses |
 |---|---|
-| `pages/index.astro` | `LIVE_TOOLS` for the primary grid, `PLANNED_TOOLS` for the roadmap |
-| `components/Header.astro` | `LIVE_TOOLS` for nav links, with `aria-current` on the active one |
-| `layouts/ToolLayout.astro` | `toolBySlug` for the h1, description, JSON-LD; the rest for "more tools" |
+| `pages/index.astro` | `TOOL_GROUPS` + `liveToolsIn` for one grid per group, `PLANNED_TOOLS` for the roadmap |
+| `components/Header.astro` | `TOOL_GROUPS` for four links to `/#<group>` |
+| `components/ToolGroupNav.astro` | `liveToolsIn(tool.group)` for the sibling strip |
+| `layouts/ToolLayout.astro` | `toolBySlug` for the h1, description, JSON-LD; the rest for "more tools", same group first |
 | `pages/sitemap.xml.ts` | `LIVE_TOOLS` only — planned tools never reach the sitemap |
 
 `status: 'planned'` renders a dimmed, dashed, non-clickable card and is excluded from nav and
@@ -188,13 +199,35 @@ sitemap. It exists so the roadmap is visible without shipping a dead link.
 
 **Adding a tool:**
 
-1. Add an entry to `TOOLS` with `status: 'live'`.
+1. Add an entry to `TOOLS` with `status: 'live'` and a `group`. Entries within a group appear in
+   registry order, so place it where it should sit among its siblings.
 2. Create `src/pages/tools/<slug>.astro` wrapped in `<ToolLayout slug="<slug>">`.
 3. Put non-trivial logic in `src/lib/<tool>.ts` as pure functions.
 4. Add checks to `scripts/verify.ts`.
 
 Nothing else needs editing. The home page, nav, sitemap and cross-links pick it up. Give the
 entry a `vi` name and tagline too — the Vietnamese page lists every tool in its nav and footer.
+
+### Tool groups
+
+Thirteen tools do not fit in a header, and a flat grid of them buries related tools among
+unrelated ones. So every tool belongs to one of four groups — **Network**, **Security**,
+**Data formats**, **Date & time** — and the group is what the navigation is built from:
+
+- **Home page** — one titled section per group (`id="network"` and so on), in `TOOL_GROUPS`
+  order. Sections carry `scroll-margin-top` so the sticky header does not cover a heading
+  reached by anchor.
+- **Header** — four links, one per group, to `/#<group>`. This was chosen over per-group
+  dropdown menus: it needs no script, works the same on every page, and the home page already
+  is the grouped menu. Hidden below 660px, like the tool links it replaced.
+- **Sibling strip** — `ToolGroupNav` sits between the breadcrumb and the title of every tool
+  page and lists the live tools of that page's group, the current one filled with the accent.
+  The group name at its start links back to the group's section. It renders nothing for a group
+  of one, and scrolls sideways within itself when a group is wider than the screen.
+- **More tools** — the cards at the foot of a tool page list same-group tools first.
+
+The network group is where this matters most: the subnet calculator, range converter,
+aggregator, splitter and IPv6 calculator are five pages that people use in sequence.
 
 ### Page language
 
@@ -205,7 +238,7 @@ badge, the "more tools" cards, the theme toggle's labels, and the JSON-LD `inLan
 strings live in `src/data/i18n.ts`. The copy buttons' "Copied" feedback is chosen in `lib/ui.ts`
 from `<html lang>`, so it needs no wiring per page.
 
-Only the lunar calendar uses it today (§6.9). The page content itself is written directly in the
+Only the lunar calendar uses it today (§6.13). The page content itself is written directly in the
 page; there is no message catalogue, because no page exists in two languages. The brand name,
 *Technical Toolkit*, stays as it is in both.
 
@@ -352,6 +385,9 @@ page; there is no message catalogue, because no page exists in two languages. Th
 
 ### 6.7 Subnet calculator — `/tools/subnet-calculator/`
 
+*The first of five network tools; §6.8–§6.11 are its siblings, and all five share the sibling
+strip described in §5.*
+
 One text field, everything derived from it as you type. Accepts `10.0.0.1/24`,
 `10.0.0.1/255.255.255.0`, a space instead of the slash, or a bare address (taken as `/32`, and the
 page says so rather than silently assuming).
@@ -392,7 +428,95 @@ pinned in the suite (the lib covers /0 even where the table does not), because a
 would publish a wrong reference table to every visitor. The table is the one element allowed to
 scroll sideways; the page body is not.
 
-### 6.8 Epoch converter — `/tools/epoch-converter/`
+### 6.8 IP range to CIDR — `/tools/ip-range-to-cidr/`
+
+One range per line in, the fewest CIDR blocks that cover each range exactly out. Ends are separated
+by a spaced hyphen, an en dash or `to`; a bare hyphen is accepted for IPv4 only, where it cannot be
+mistaken for part of the address. A line holding one address or one CIDR is its own range, and
+`#` starts a comment. IPv4 and IPv6 can share the input.
+
+| Control | Options | Default |
+|---|---|---|
+| Write each block as | CIDR / address + mask / ACL wildcard | CIDR |
+| Separate blocks with | new line / comma | new line |
+
+Masks and wildcards are IPv4 notions, so IPv6 blocks stay prefixes whatever the style. The output
+note counts ranges, blocks and addresses. A bad line fails the whole transform with its line
+number, because a partial block list for a firewall is worse than none.
+
+**Minimality is proved, not assumed.** `rangeToCidrs` is greedy from the low end: each block is as
+large as the start address's alignment allows without passing the end. The suite checks all
+32,896 ranges inside a /24 against a dynamic-programming optimum, and asserts for each that the
+blocks tile the range with no gap, no overlap and no misaligned block.
+
+### 6.9 CIDR aggregator / supernet — `/tools/cidr-aggregator/`
+
+A list of prefixes in, one of two summaries out:
+
+- **Aggregate** — lossless. Duplicate, contained, overlapping and adjacent prefixes merge into the
+  fewest blocks covering exactly the same addresses. Implemented as merge-intervals followed by
+  range-to-CIDR on each merged interval, so it inherits §6.8's minimality.
+- **Supernet** — the single shortest prefix containing every input, per address family. The page
+  states how many addresses it covers that no input did, as a count and a percentage, because
+  that surplus is exactly what makes a summary route attract traffic it cannot deliver.
+
+The input is forgiving and the page says what it forgave. Entries may be separated by new lines,
+commas, semicolons or spaces; `10.0.0.0 255.255.255.0` is one entry because a token joins its
+predecessor only when it is a whole, valid dotted mask (checking just the first octet would glue
+`192.168.0.0/16` onto the entry before it). Commas and semicolons always separate. A report card
+below the panes lists unreadable entries with their line, prefixes whose host bits were cleared
+(`192.168.1.77/24 → 192.168.1.0/24`), duplicates, and prefixes already inside another — each list
+capped at 50 with a count of the rest. Up to 10,000 entries are read.
+
+The suite checks that aggregation never changes the address set and is idempotent, over 400
+random lists compared address by address in a bitmap.
+
+### 6.10 CIDR splitter — `/tools/cidr-splitter/`
+
+A parent network and either a number of subnets or a prefix length in; every subnet out, with its
+first and last address and usable-host count. A count that is not a power of two rounds up, and
+the hint says how many spares that creates. IPv4 usable hosts lose network and broadcast except on
+/31 and /32; IPv6 counts every address.
+
+Splits get large fast — a /8 into /32s is 16,777,216 rows, a /48 into /64s is 65,536 — so the
+count shown is always the true total, the table draws the first 1,024 rows (in its own scrolling
+box with a sticky header), and *Copy list* and *CSV* carry the first 65,536. Both limits are
+exported from `lib/iprange.ts` so the page text and the code cannot disagree. Each mode remembers
+its own number, so switching between *count* and *prefix* does not lose what was typed.
+
+**VLSM was scoped out** at the planning stage (§12): the page does equal splits only.
+
+### 6.11 IPv6 calculator — `/tools/ipv6-calculator/`
+
+The IPv6 counterpart of §6.7, built on `lib/ipv6.ts`, where addresses are 128-bit `bigint`s.
+Input accepts every RFC 4291 text form — compressed, full, trailing dotted IPv4, brackets, and a
+`%zone`, which is set aside and mentioned. A bare address is /128.
+
+Five facts carry the accent: network in CIDR, prefix length, first address, last address, total
+addresses (`2^64`, with the full number underneath when it is long). The rest: the address in
+RFC 5952 canonical and expanded form, the mask, how many /64s fit, the address type, embedded
+IPv4, EUI-64 MAC, the full `ip6.arpa` name and the reverse zone for the prefix. A wide card shows
+the network in binary, and a build-time table lists prefix sizes from /128 to /16 with their /64
+counts and typical uses.
+
+- **Canonical text is RFC 5952 exactly**: lowercase, no leading zeros, the longest run of two or
+  more zero groups compressed (the first on a tie), a lone zero group left alone, and
+  IPv4-mapped addresses printed with a dotted quad. The RFC's own examples are pinned, and 2,000
+  generated values round-trip through both the canonical and the expanded form.
+- **Types are matched most-specific-first** over 15 rules: unspecified, loopback, IPv4-mapped,
+  NAT64 and local NAT64, discard, Teredo, ORCHIDv2, both documentation ranges (2001:db8::/32 and
+  RFC 9637's 3fff::/20), 6to4, unique local, link-local, multicast and global unicast.
+- **Embedded IPv4** is read where the type defines it: last 32 bits for IPv4-mapped and NAT64,
+  bits 16–47 for 6to4, and the inverted last 32 bits for a Teredo client — pinned with RFC 4380's
+  own example.
+- **EUI-64** — when the interface ID has the `ff:fe` marker, the MAC is recovered with the
+  universal/local bit flipped back, and the note says that this identifier exposes the hardware.
+- **Reverse DNS** — the 32-nibble name is pinned against RFC 3596's example. A zone exists only
+  on a nibble boundary, so for a /49 the page gives the /48 zone and says to delegate eight /52s.
+- **No "minus two"** — IPv6 has no broadcast. The first address is noted as the subnet-router
+  anycast address.
+
+### 6.12 Epoch converter — `/tools/epoch-converter/`
 
 One field that takes whatever a log line hands you: a bare epoch number in seconds, milliseconds,
 microseconds or nanoseconds, a fractional one like `1758086602.123`, ISO 8601, or the
@@ -476,7 +600,7 @@ them: a check pins `1970-01-01` in `Asia/Ho_Chi_Minh` at **+08:00**, which is wh
 before 1975, precisely because "apply the current offset to every date" is the shortcut that makes
 a converter wrong about anything historical.
 
-### 6.9 Lunar calendar converter — `/tools/lunar-calendar/`
+### 6.13 Lunar calendar converter — `/tools/lunar-calendar/`
 
 **The page is entirely in Vietnamese** — content, chrome, notes and error messages — because the
 calendar and the people who look dates up in it are. `lib/lunar.ts` therefore throws its refusals
@@ -525,7 +649,7 @@ own 2004 example, the 1968 and 1985 Hanoi/Beijing splits, the 2033 leap month 11
 days (Tết 2024 was a Giáp Thìn day, month and year), and a round trip over all 109,573 days of
 the range.
 
-### 6.10 Shared tool chrome
+### 6.14 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
 `IoPanel` and `lib/textio.ts`:
@@ -544,24 +668,32 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   transient "Copied" label, and an ARIA live region so the flash is announced.
 - **Bulk panel** — count, generate, copy all, download `.txt`, per-row copy.
 - **Error line** — `role="alert"`, used for impossible option combinations.
+- **Privacy badge** — under every tool title: “Runs entirely in your browser. Nothing you enter is
+  sent anywhere.” It used to say “Generated locally with your browser's crypto API” on every
+  tool, which was only ever true of the two generators.
 - **Text panes** — input and output textareas side by side above 820px, stacked below; a
   character/byte/line count under each; Copy, Save, Clear, Sample, and *Use as input* to feed a
   result back. Height starts at 15rem and is per-tool: `IoPanel` takes a `minHeight` prop that
   sets `--io-min-height`, which the JSON formatter doubles to 30rem because its documents run long.
-  Both panes stay user-resizable regardless. Transforms are debounced at 140 ms and tagged with a generation counter, so an
-  async result (the first YAML parse, which waits on an import) can never overwrite a newer one.
+  Both panes stay user-resizable regardless. Transforms are debounced at 140 ms and tagged with a
+  generation counter, so an async result (the first YAML parse, which waits on an import) can
+  never overwrite a newer one. An `onEmpty` hook lets a page clear anything it drew outside the
+  panes — the aggregator's report — when the input is emptied, since the transform does not run
+  then.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
-  `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`) and restored on the next visit. Output is never stored. A stored value naming
+  `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`, `tt-subnet`, `tt-range`,
+  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`) and restored on the next visit. Output is never stored. A stored value naming
   a wordlist or separator we no longer ship falls back to the default instead of blanking the
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.11 Site-wide
+### 6.15 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, two tools.
+- **Pages** — home, about, privacy, 404, and thirteen tools in four groups (§5, *Tool groups*).
+- **Navigation** — header links to the four groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
 - **Prefetch** — Astro prefetches links on hover.
@@ -672,7 +804,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 396 checks, Node, no browser
+npm run verify   # 497 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -746,11 +878,25 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **JSON highlighting** — tokens tile every input with no gap or overlap and the layer's text
   equals the textarea's (fuzzed over 3,000 inputs), key/string classification, markup escaping,
   and where the error mark lands.
+- **IPv6** — RFC 5952 and RFC 3596 examples, 13 malformed inputs refused, 2,000 round trips,
+  every address type, embedded IPv4 including Teredo's inversion, EUI-64, masks and counts.
+- **Range to CIDR** — all 32,896 ranges in a /24 against a DP optimum; every accepted separator;
+  refusals by name (reversed, mixed family, three ends).
+- **Aggregate and supernet** — known merges, 400 random lists checked address by address for an
+  unchanged set and idempotence, supernet surplus counts, list parsing (masks after a space,
+  commas as hard separators, host bits, line-numbered problems, the entry limit).
+- **Split** — equal splits, rounding up, the /8-into-/32 and /48-into-/64 counts with truncation,
+  refusals.
 - **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
   in full, because both tables are rendered at build time and a regression would hand every
   visitor a wrong reference.
 
 Run it after touching anything in `src/lib/`.
+
+**Browser runs.** Since the JSON highlighting work, each UI change has also been driven in
+headless Chrome over the DevTools protocol — type into the page, read the DOM, take screenshots,
+collect uncaught exceptions. The scripts are throwaway and not in the repository; §11 gap 2 is
+about making that permanent.
 
 ---
 
@@ -763,7 +909,7 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 23.9 KB (5.2 KB) | every page |
+| CSS | 25.3 KB (5.4 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
 | Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
@@ -775,6 +921,9 @@ Bundle sizes as built (gzip in brackets):
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
 | Epoch page script | 11.6 KB (4.8 KB) | epoch page |
 | Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
+| IPv6 library | 5.3 KB (2.4 KB) | IPv6 page and the three range tools |
+| Range library | 4.9 KB (2.1 KB) | range, aggregator and splitter pages |
+| Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
@@ -828,18 +977,88 @@ Honest list, in rough order of how much they matter:
    such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
    word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
    test before it was understood.
-10. **The subnet calculator is IPv4 only.** Subnet masks, broadcast addresses and the /31 rule
-    are IPv4 concepts; IPv6 needs a different presentation rather than a wider parser.
+10. **Two address models live side by side.** `ipv4.ts` works on 32-bit numbers and powers the
+    subnet calculator; `iprange.ts` works on `bigint` for both families and powers the newer
+    tools. They agree — `iprange` parses IPv4 through `ipv4.ts` — but the subnet calculator could
+    move onto the shared model, which would also let it accept IPv6 and retire the separate page.
+    Not done, because the IPv4 page's /31, broadcast and classful presentation does not carry over.
 11. **The epoch converter leans on the browser for two things.** Zone rendering comes from
     `Intl`, so the answer is only as current as the visitor's tz database — a device that has not
     been updated since a country last moved its clocks will render recent dates in that zone
     wrongly, and the page has no way to know. Separately, date strings containing letters still go
     through `Date.parse`, which is implementation-defined beyond ISO 8601; the letterless cases are
-    refused outright (§6.8) but `"Sept 17 2026"` may parse in one engine and not another.
+    refused outright (§6.12) but `"Sept 17 2026"` may parse in one engine and not another.
 12. **The lunar calendar inherits the article's precision.** Thirteen month boundaries in
-    1900–2199 land a day off the author's full-precision tables (§6.9), four of them in this
+    1900–2199 land a day off the author's full-precision tables (§6.13), four of them in this
     century's second half. A fuller new-moon series (Meeus ch. 49) would likely close them, at the
     cost of no longer being the algorithm the page cites. South Vietnam's 1968–1975 calendar, which
     stayed on UTC+8, is not modelled.
 13. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
     behind them.
+
+---
+
+## 12. Roadmap and ideas
+
+A running record of what was decided, what is done, and what is next. Newest decisions first.
+
+### Decisions on the network group
+
+Asked and answered before building §6.8–§6.11:
+
+| Question | Decision |
+|---|---|
+| One page with modes, or separate tools? | Separate pages in a **Network** group, with a sibling strip |
+| Header: dropdown menus per group, or links? | **Four links** to the grouped sections of the home page |
+| UI language for the new tools | **English**, like every page but the lunar calendar |
+| VLSM (allocate by host counts) in the splitter? | **No** — equal splits only |
+| IPv6 in the range, aggregator and splitter tools now or later? | **Now** — one `bigint` implementation serves both families |
+
+### Done
+
+| Area | What |
+|---|---|
+| Generators | Password and passphrase generators, entropy readout, bulk mode |
+| Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML |
+| Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
+| Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
+| Site | Tool groups on the home page, group links in the header, sibling strip, Vietnamese chrome for the lunar page |
+
+### In progress
+
+Nothing is half-built. Every tool in the registry marked `live` is complete and verified; the two
+`planned` entries have no code yet.
+
+### Next, in rough order
+
+1. **Make the browser checks permanent** (gap 2): a static audit of `dist/` for DOM hooks and
+   third-party origins, then a Playwright smoke test per tool.
+2. **UUID generator** (planned card): v4 from `crypto.randomUUID`, v7 with a millisecond
+   timestamp, bulk mode reusing `BulkPanel`, and a decoder that reads the version and v7 time.
+3. **JWT decoder** (planned card): header and payload pretty-printed with the JSON highlighter,
+   `exp`/`iat`/`nbf` rendered through `epoch.ts`, and a clear statement that the signature is not
+   verified — verification needs a key the page should never ask for.
+4. **Passphrase default** (gap 1): per-wordlist recommended word counts so the default reaches
+   *Strong*.
+5. **YAML highlighting and line numbers** (gap 5), on the same layer technique as JSON.
+
+### Ideas not yet scheduled
+
+Collected while planning; all fit the static, nothing-leaves-the-browser constraint in §1.
+
+- **Cron expression explainer** — plain-English reading and the next run times; systemd
+  `OnCalendar` too.
+- **chmod / umask calculator** — octal ↔ `rwx` ↔ symbolic, with setuid/setgid/sticky.
+- **Regex tester** — JavaScript dialect, stated as such; matches, named groups, replacement preview.
+- **Certificate / CSR decoder** — PEM in, subject, SANs, validity, key and fingerprints out;
+  fingerprints reuse `hash.ts`, the ASN.1 parser is the real work.
+- **MAC address tool** — format normalisation, EUI-64, U/L and multicast bits, and an OUI vendor
+  lookup (the one idea with a sizeable dataset, ~300 KB lazy-loaded).
+- **URL parser and encoder**, **data size and transfer-time calculator**, **HMAC** (a small
+  extension of the hash tool), **TOTP code generator**, **config format converter**
+  (JSON ↔ YAML ↔ TOML ↔ `.env`).
+- **IPv6 in the subnet calculator** — see gap 10.
+
+Deliberately out of scope: anything that needs a server or a third-party API — ping, traceroute,
+DNS lookups, whois, port scans, checking a live site's certificate. Each would break the promise in
+§1, and the privacy page says so in as many words.

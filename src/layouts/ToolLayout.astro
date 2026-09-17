@@ -1,6 +1,7 @@
 ---
 import BaseLayout from "./BaseLayout.astro";
 import ToolCard from "../components/ToolCard.astro";
+import ToolGroupNav from "../components/ToolGroupNav.astro";
 import { LIVE_TOOLS, toolBySlug, toolText } from "../data/tools";
 import { CHROME, type Lang } from "../data/i18n";
 import { SITE } from "../data/site";
@@ -14,7 +15,10 @@ const { slug, lang = "en" } = Astro.props;
 const tool = toolBySlug(slug);
 const text = toolText(tool, lang);
 const chrome = CHROME[lang];
-const others = LIVE_TOOLS.filter((t) => t.slug !== slug);
+// Same-group tools first: someone on a network tool wants the next network tool.
+const others = LIVE_TOOLS.filter((t) => t.slug !== slug).sort(
+  (a, b) => Number(b.group === tool.group) - Number(a.group === tool.group),
+);
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -33,6 +37,8 @@ const jsonLd = {
   <nav class="breadcrumb" aria-label={chrome.breadcrumb}>
     <a href="/">{chrome.breadcrumbHome}</a> <span aria-hidden="true">/</span> {text.name}
   </nav>
+
+  <ToolGroupNav slug={slug} lang={lang} />
 
   <div class="tool-head">
     <h1>{text.name}</h1>

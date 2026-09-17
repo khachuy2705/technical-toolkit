@@ -1484,7 +1484,7 @@ select {
 }
 
 .lunar-fields input,
-.lunar-year-input {
+.number-input {
   width: 100%;
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border-strong);
@@ -1496,8 +1496,112 @@ select {
   font-size: 0.95rem;
 }
 
-.lunar-year-input {
+/* A short standalone number box: a year, a subnet count. */
+.number-input {
   width: 8rem;
+}
+
+/* --------------------------------------------------------------------------- Tool groups */
+
+/* The sticky header would cover a section heading reached through /#network. */
+.tool-section {
+  scroll-margin-top: 5rem;
+}
+
+.tool-section + .tool-section {
+  margin-top: clamp(1.75rem, 4vw, 2.5rem);
+}
+
+.group-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1.1rem;
+  /* A long group scrolls sideways inside itself; the page never does. */
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.group-nav__label {
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  text-decoration: none;
+}
+
+.group-nav__label:hover {
+  color: var(--accent);
+}
+
+.group-nav__list {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.2rem;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.group-nav__list a {
+  display: block;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.group-nav__list a:hover {
+  background: var(--bg-subtle);
+  color: var(--text);
+}
+
+.group-nav__list a[aria-current="page"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+/* --------------------------------------------------------------------------- Report list */
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report__item {
+  padding: 0.45rem 0.7rem;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-subtle);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.report__item--warn {
+  border-left-color: var(--strength-1);
+}
+
+/* Split table: a long list scrolls inside its card. */
+.split-table {
+  max-height: 32rem;
+  overflow: auto;
+}
+
+.split-table .sheet thead th {
+  position: sticky;
+  top: 0;
 }
 
 /* --------------------------------------------------------------------------- Hash rows */

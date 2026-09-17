@@ -1,0 +1,327 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { formatCount } from "../../lib/ipv6";
+
+const FACTS = [
+  { id: "cidr", label: "Network (CIDR)", primary: true },
+  { id: "prefix", label: "Prefix length", primary: true },
+  { id: "first", label: "First address", primary: true },
+  { id: "last", label: "Last address", primary: true },
+  { id: "total", label: "Total addresses", primary: true },
+  { id: "address", label: "Address, canonical", primary: false },
+  { id: "expanded", label: "Address, expanded", primary: false },
+  { id: "mask", label: "Prefix mask", primary: false },
+  { id: "subnets64", label: "/64 subnets", primary: false },
+  { id: "kind", label: "Address type", primary: false },
+  { id: "embedded", label: "Embedded IPv4", primary: false },
+  { id: "mac", label: "EUI-64 MAC", primary: false },
+  { id: "arpa", label: "Reverse DNS name", primary: false },
+  { id: "zone", label: "Reverse DNS zone", primary: false },
+] as const;
+
+const PRESETS = [
+  "2001:db8:abcd:12::1/64",
+  "2001:db8::/32",
+  "fe80::21a:2bff:fe3c:4d5e",
+  "fd12:3456:789a::/48",
+  "64:ff9b::192.0.2.33",
+  "2002:c000:204::1/48",
+];
+
+/** Build-time table of the prefixes people actually size things by. */
+const SHEET: readonly [number, string][] = [
+  [128, "A single address — a loopback, a host route"],
+  [127, "Point-to-point link between routers (RFC 6164)"],
+  [126, "Point-to-point link, older convention"],
+  [120, ""],
+  [112, ""],
+  [96, "IPv4-embedded prefixes such as NAT64"],
+  [80, ""],
+  [64, "One LAN. SLAAC needs exactly this length"],
+  [60, "Small site; some ISPs give this to homes"],
+  [56, "Typical home or small-business site"],
+  [52, ""],
+  [48, "Typical organisation site"],
+  [44, ""],
+  [40, ""],
+  [36, ""],
+  [32, "Minimum ISP allocation from a regional registry"],
+  [29, "Larger ISP allocation"],
+  [24, ""],
+  [20, ""],
+  [16, ""],
+];
+const SHEET_ROWS = SHEET.map(([prefix, use]) => ({
+  prefix,
+  use,
+  total: formatCount(1n << BigInt(128 - prefix)),
+  subnets: prefix <= 64 ? formatCount(1n << BigInt(64 - prefix)) : "—",
+  common: prefix === 64 || prefix === 56 || prefix === 48,
+}));
+---
+
+<ToolLayout slug="ipv6-calculator">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="v6">IPv6 address and prefix</label>
+      <span class="io__meta" id="input-meta"></span>
+    </div>
+    <input
+      type="text"
+      id="v6"
+      class="big-input"
+      value="2001:db8:abcd:12::1/64"
+      placeholder="2001:db8::1/64"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+    />
+    <p class="field__hint" style="margin-top:0.5rem">
+      Any RFC 4291 form: compressed or full, with a trailing dotted IPv4, in brackets, or with a
+      <code>%zone</code>. A bare address is taken as <code>/128</code>.
+    </p>
+    <div class="preset-row">
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+    </div>
+  </section>
+
+  <p class="output__error" id="v6-error" role="alert" hidden></p>
+
+  <ul class="facts">
+    {
+      FACTS.map((fact) => (
+        <li class:list={["fact", fact.primary && "fact--primary"]}>
+          <div class="fact__head">
+            <span class="fact__label">{fact.label}</span>
+            <button
+              type="button"
+              class="btn btn--tiny"
+              data-copy={fact.id}
+              aria-label={`Copy the ${fact.label.toLowerCase()}`}
+            >
+              <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              <span data-label>Copy</span>
+            </button>
+          </div>
+          <span class="fact__value" data-value={fact.id} data-empty="true">
+            &mdash;
+          </span>
+          <span class="fact__note" data-note={fact.id} />
+        </li>
+      ))
+    }
+    <li class="fact fact--wide">
+      <div class="fact__head">
+        <span class="fact__label">Network in binary</span>
+      </div>
+      <span class="fact__binary" data-value="binary" data-empty="true">&mdash;</span>
+    </li>
+  </ul>
+
+  <section class="card">
+    <h2 class="card__title">IPv6 prefix sizes</h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          IPv6 prefix lengths with the number of addresses and /64 subnets each holds.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Prefix</th>
+            <th scope="col" class="sheet__num">Addresses</th>
+            <th scope="col" class="sheet__num">/64 subnets</th>
+            <th scope="col">Typical use</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            SHEET_ROWS.map((row) => (
+              <tr data-common={row.common ? "" : undefined}>
+                <th scope="row" class="sheet__key">/{row.prefix}</th>
+                <td class="sheet__num">{row.total}</td>
+                <td class="sheet__num">{row.subnets}</td>
+                <td class="sheet__prose">{row.use}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      Generated from the same arithmetic as the calculator. Each step of four bits is one hex digit
+      &mdash; a nibble &mdash; which is why /48, /52, /56, /60 and /64 are the lengths that delegate
+      cleanly, in addressing plans and in <code>ip6.arpa</code> alike.
+    </p>
+  </section>
+
+  <section class="card prose">
+    <h2>One way to write each address</h2>
+    <p>
+      The same address has many spellings. RFC 5952 fixes one: lowercase, no leading zeros in a
+      group, the longest run of two or more zero groups replaced by <code>::</code> (the first run
+      if two tie), a single zero group left alone, and IPv4-mapped addresses written with their
+      dotted quad. That canonical form is what a log search or an allow-list comparison should use.
+    </p>
+
+    <h2>No broadcast, no &ldquo;minus two&rdquo;</h2>
+    <p>
+      IPv6 has no broadcast address, so the IPv4 habit of subtracting two does not apply: a prefix
+      holds exactly 2<sup>128&minus;n</sup> addresses. The first one is the subnet-router anycast
+      address, which many routers answer on, and the last 128 of a /64 are reserved for other
+      anycast uses by RFC 2526 &mdash; worth avoiding for hosts, but still inside the range shown.
+    </p>
+
+    <h2>What the extra facts mean</h2>
+    <p>
+      <b>Embedded IPv4</b> appears for address types that define where an IPv4 address sits:
+      IPv4-mapped and NAT64 in the last 32 bits, 6to4 in bits 16&ndash;47, and Teredo, which stores
+      the client address with every bit inverted. <b>EUI-64 MAC</b> appears when the interface
+      identifier has the <code>ff:fe</code> marker SLAAC inserts; the MAC is recovered by flipping
+      the universal/local bit back. Modern systems prefer random identifiers precisely because this
+      one leaks the hardware address.
+    </p>
+    <p>
+      The <b>reverse DNS name</b> is the full 32-nibble <code>ip6.arpa</code> name of the address.
+      The <b>zone</b> is the name for the prefix, which only exists on a nibble boundary; for
+      other lengths the page says which boundary to delegate at instead.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    classifyIpv6,
+    describeIpv6,
+    embeddedIpv4,
+    eui64Mac,
+    expandIpv6,
+    formatCount,
+    formatIpv6,
+    ip6Arpa,
+    ipv6Binary,
+    parseIpv6Cidr,
+  } from "../../lib/ipv6";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-ipv6";
+  const input = el<HTMLInputElement>("#v6");
+  const meta = el<HTMLElement>("#input-meta");
+  const errorBox = el<HTMLElement>("#v6-error");
+
+  const values = new Map(all<HTMLElement>("[data-value]").map((n) => [n.dataset["value"]!, n]));
+  const notes = new Map(all<HTMLElement>("[data-note]").map((n) => [n.dataset["note"]!, n]));
+  let current = new Map<string, string>();
+
+  const saved = loadPrefs(PREFS_KEY, { text: "" }).text;
+  if (typeof saved === "string" && saved.length > 0) input.value = saved;
+
+  function set(id: string, value: string | null, note = ""): void {
+    if (value === null) current.delete(id);
+    else current.set(id, value);
+    const node = values.get(id);
+    if (node) {
+      node.textContent = value ?? "—";
+      if (value === null) node.dataset["empty"] = "true";
+      else delete node.dataset["empty"];
+    }
+    const noteNode = notes.get(id);
+    if (noteNode) noteNode.textContent = note;
+  }
+
+  function clear(): void {
+    current = new Map();
+    for (const id of values.keys()) set(id, null);
+  }
+
+  function run(): void {
+    savePrefs(PREFS_KEY, { text: input.value });
+    if (input.value.trim().length === 0) {
+      errorBox.hidden = true;
+      meta.textContent = "";
+      clear();
+      return;
+    }
+
+    let parsed: ReturnType<typeof parseIpv6Cidr>;
+    try {
+      parsed = parseIpv6Cidr(input.value);
+    } catch (error) {
+      errorBox.textContent = error instanceof Error ? error.message : String(error);
+      errorBox.hidden = false;
+      meta.textContent = "";
+      clear();
+      return;
+    }
+    errorBox.hidden = true;
+
+    const net = describeIpv6(parsed.address, parsed.prefix);
+    const cidr = `${formatIpv6(net.network)}/${net.prefix}`;
+    const remarks: string[] = [];
+    if (parsed.prefixAssumed) remarks.push("no prefix given — assuming /128");
+    else if (net.address !== net.network) remarks.push(`host address inside ${cidr}`);
+    else remarks.push("this is the network address itself");
+    if (parsed.zone) remarks.push(`zone %${parsed.zone} set aside`);
+    meta.textContent = remarks.join(" · ");
+
+    set("cidr", cidr, "canonical, host bits cleared");
+    set("prefix", `/${net.prefix}`, `${net.prefix} network bits, ${128 - net.prefix} interface bits`);
+    set("first", formatIpv6(net.network), net.prefix < 127 ? "also the subnet-router anycast address" : "");
+    set("last", formatIpv6(net.last));
+    set("total", formatCount(net.total), net.total > 10n ** 15n ? net.total.toLocaleString("en-US") : "");
+
+    set("address", formatIpv6(net.address), "RFC 5952");
+    set("expanded", expandIpv6(net.address), "all eight groups, four digits each");
+    set("mask", formatIpv6(net.mask), `/${net.prefix} as a mask`);
+    set(
+      "subnets64",
+      net.subnets64 === null ? "none" : formatCount(net.subnets64),
+      net.subnets64 === null ? "the prefix is longer than /64" : net.prefix === 64 ? "this is one LAN" : "",
+    );
+
+    const kind = classifyIpv6(net.address);
+    set("kind", kind.label, kind.cidr ? `${kind.cidr} — ${kind.note}` : kind.note);
+
+    const v4 = embeddedIpv4(net.address);
+    set("embedded", v4 ? v4.address : "none", v4 ? v4.role : "this address type carries no IPv4 address");
+
+    const mac = eui64Mac(net.address);
+    set("mac", mac ?? "none", mac ? "U/L bit flipped back — this identifier exposes the hardware" : "no ff:fe marker in the interface ID");
+
+    set("arpa", ip6Arpa(net.address), "PTR record name for this address");
+    if (net.prefix % 4 === 0) {
+      set("zone", ip6Arpa(net.network, net.prefix / 4), `the zone for this /${net.prefix}`);
+    } else {
+      const down = net.prefix - (net.prefix % 4);
+      const up = down + 4;
+      set(
+        "zone",
+        ip6Arpa(net.network, down / 4),
+        `/${net.prefix} is not on a nibble boundary: this is the /${down} zone; delegate ${2 ** (up - net.prefix)} /${up} zones instead`,
+      );
+    }
+
+    const binary = values.get("binary")!;
+    binary.textContent = `${ipv6Binary(net.network)}  /${net.prefix}`;
+    delete binary.dataset["empty"];
+  }
+
+  input.addEventListener("input", run);
+
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      input.value = button.dataset["preset"]!;
+      input.focus();
+      run();
+    });
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-copy]")) {
+    const id = button.dataset["copy"]!;
+    attachCopy(button, () => current.get(id) ?? "");
+  }
+
+  run();
+</script>

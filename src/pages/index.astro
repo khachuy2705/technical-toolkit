@@ -1,7 +1,7 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 import ToolCard from "../components/ToolCard.astro";
-import { LIVE_TOOLS, PLANNED_TOOLS } from "../data/tools";
+import { liveToolsIn, PLANNED_TOOLS, TOOL_GROUPS } from "../data/tools";
 import { SITE } from "../data/site";
 ---
 
@@ -11,9 +11,25 @@ import { SITE } from "../data/site";
     <p>Everything runs in your browser. No accounts, no tracking, nothing sent anywhere.</p>
   </section>
 
-  <ul class="tool-grid tool-grid--primary">
-    {LIVE_TOOLS.map((tool) => <ToolCard tool={tool} />)}
-  </ul>
+  {
+    TOOL_GROUPS.map((group) => {
+      const tools = liveToolsIn(group.id);
+      return (
+        tools.length > 0 && (
+          <section class="tool-section" id={group.id} aria-labelledby={`${group.id}-title`}>
+            <h2 class="section-label" id={`${group.id}-title`}>
+              {group.name}
+            </h2>
+            <ul class="tool-grid tool-grid--primary">
+              {tools.map((tool) => (
+                <ToolCard tool={tool} />
+              ))}
+            </ul>
+          </section>
+        )
+      );
+    })
+  }
 
   {
     PLANNED_TOOLS.length > 0 && (

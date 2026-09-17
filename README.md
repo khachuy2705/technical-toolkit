@@ -6,7 +6,9 @@ its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
 **hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**,
-**subnet calculator**, **epoch converter**, **lunar calendar converter** (âm lịch).
+**epoch converter**, **lunar calendar converter** (âm lịch), and a network group: **subnet
+calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR splitter** and **IPv6
+calculator**. Tools are grouped on the home page — Network, Security, Data formats, Date & time.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -64,6 +66,8 @@ src/
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
 │   ├── ipv4.ts          Address parsing and subnet arithmetic
+│   ├── ipv6.ts          IPv6 parsing, RFC 5952 formatting, address types
+│   ├── iprange.ts       Range to CIDR, aggregation, supernet, splitting (IPv4 + IPv6)
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
