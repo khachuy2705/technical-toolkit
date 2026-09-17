@@ -30,6 +30,13 @@ function announce(message: string): void {
 
 const COPY_FEEDBACK_MS = 1400;
 
+/** Copy feedback in the page's own language, read from `<html lang>`. */
+function copyWords(): { copied: string; failed: string; announced: string } {
+  return document.documentElement.lang.startsWith("vi")
+    ? { copied: "Đã chép", failed: "Không chép được", announced: "Đã sao chép vào bộ nhớ tạm" }
+    : { copied: "Copied", failed: "Copy failed", announced: "Copied to clipboard" };
+}
+
 /**
  * Wires a button to copy text. The label inside `[data-label]` (or the button
  * itself) briefly becomes "Copied", and reverts even if the user clicks again
@@ -47,9 +54,10 @@ export function attachCopy(button: HTMLButtonElement, getText: () => string): vo
     const ok = await copyText(text);
     window.clearTimeout(timer);
 
+    const words = copyWords();
     button.dataset["copied"] = String(ok);
-    if (labelEl) labelEl.textContent = ok ? "Copied" : "Copy failed";
-    announce(ok ? "Copied to clipboard" : "Copy failed");
+    if (labelEl) labelEl.textContent = ok ? words.copied : words.failed;
+    announce(ok ? words.announced : words.failed);
 
     timer = window.setTimeout(() => {
       delete button.dataset["copied"];

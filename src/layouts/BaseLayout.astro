@@ -2,6 +2,7 @@
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 import { SITE } from "../data/site";
+import { CHROME, type Lang } from "../data/i18n";
 import "../styles/global.css";
 
 interface Props {
@@ -10,16 +11,18 @@ interface Props {
   /** Leave unset on the home page, where the title is already the site name. */
   suffix?: boolean;
   keywords?: readonly string[];
+  /** Language of the page and of the chrome drawn around it. */
+  lang?: Lang;
 }
 
-const { title, description, suffix = true, keywords = [] } = Astro.props;
+const { title, description, suffix = true, keywords = [], lang = "en" } = Astro.props;
 
 const fullTitle = suffix ? `${title} — ${SITE.name}` : title;
 const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang={CHROME[lang].htmlLang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -47,12 +50,12 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
   </head>
 
   <body>
-    <Header />
+    <Header lang={lang} />
     <main>
       <div class="container">
         <slot />
       </div>
     </main>
-    <Footer />
+    <Footer lang={lang} />
   </body>
 </html>

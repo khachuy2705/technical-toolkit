@@ -6,7 +6,16 @@
  * and one page under `src/pages/tools/<slug>.astro`; nothing else needs to know.
  */
 
+import type { Lang } from './i18n';
+
 export type ToolStatus = 'live' | 'planned';
+
+/** A tool's own words, in one language. */
+export interface ToolText {
+  readonly name: string;
+  readonly tagline: string;
+  readonly description: string;
+}
 
 export interface Tool {
   readonly slug: string;
@@ -19,6 +28,11 @@ export interface Tool {
   /** Inner markup of a 24x24 stroked SVG. */
   readonly icon: string;
   readonly status: ToolStatus;
+  /**
+   * Vietnamese name and tagline, for pages rendered in Vietnamese. The
+   * description is only needed for a tool whose own page is Vietnamese.
+   */
+  readonly vi: { readonly name: string; readonly tagline: string; readonly description?: string };
 }
 
 export const TOOLS: readonly Tool[] = [
@@ -31,6 +45,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['password generator', 'random password', 'strong password', 'entropy'],
     icon: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
     status: 'live',
+    vi: { name: 'Tạo mật khẩu', tagline: 'Mật khẩu ngẫu nhiên, hiện độ mạnh tức thì.' },
   },
   {
     slug: 'passphrase-generator',
@@ -41,6 +56,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['passphrase generator', 'diceware', 'eff wordlist', 'memorable password'],
     icon: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 8h.01"/><path d="M8 8h.01"/><path d="M8 16h.01"/><path d="M16 16h.01"/><path d="M12 12h.01"/>',
     status: 'live',
+    vi: { name: 'Tạo cụm mật khẩu', tagline: 'Cụm từ kiểu diceware, dễ nhớ.' },
   },
   {
     slug: 'hash-generator',
@@ -51,6 +67,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['hash generator', 'md5', 'sha256', 'sha512', 'checksum'],
     icon: '<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
     status: 'live',
+    vi: { name: 'Tạo mã băm', tagline: 'MD5, SHA-256 và SHA-512 cho văn bản hoặc tệp.' },
   },
   {
     slug: 'subnet-calculator',
@@ -61,6 +78,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['subnet calculator', 'cidr calculator', 'ipv4 subnet', 'netmask', 'network address'],
     icon: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>',
     status: 'live',
+    vi: { name: 'Tính subnet', tagline: 'Nhập IP và prefix, ra toàn bộ thông số mạng.' },
   },
   {
     slug: 'epoch-converter',
@@ -77,6 +95,30 @@ export const TOOLS: readonly Tool[] = [
     ],
     icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
     status: 'live',
+    vi: { name: 'Đổi epoch', tagline: 'Đổi Unix time sang ngày giờ và ngược lại.' },
+  },
+  {
+    slug: 'lunar-calendar',
+    name: 'Lunar Calendar Converter',
+    tagline: 'Âm lịch to dương lịch and back, by Vietnamese rules.',
+    description:
+      'Convert between the Vietnamese lunar calendar and the Gregorian one, with leap months, Can Chi names and every month of a lunar year. Computed for Hanoi time, as the Vietnamese calendar is.',
+    keywords: [
+      'lunar calendar converter',
+      'am lich',
+      'doi ngay am duong',
+      'vietnamese lunar calendar',
+      'can chi',
+      'tet date',
+    ],
+    icon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+    status: 'live',
+    vi: {
+      name: 'Đổi lịch âm dương',
+      tagline: 'Âm lịch sang dương lịch và ngược lại, theo lịch Việt Nam.',
+      description:
+        'Đổi ngày giữa âm lịch Việt Nam và dương lịch, có tháng nhuận, Can Chi và bảng các tháng trong năm. Tính theo giờ Hà Nội, đúng như lịch Việt Nam.',
+    },
   },
   {
     slug: 'uuid-generator',
@@ -86,6 +128,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['uuid', 'guid', 'identifier'],
     icon: '<path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="M8 12h8"/>',
     status: 'planned',
+    vi: { name: 'Tạo UUID', tagline: 'Mã định danh v4 và v7, tạo hàng loạt.' },
   },
   {
     slug: 'base64',
@@ -96,6 +139,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['base64', 'encode', 'decode', 'base64url'],
     icon: '<path d="m18 16 4-4-4-4"/><path d="m6 8-4 4 4 4"/><path d="m14.5 4-5 16"/>',
     status: 'live',
+    vi: { name: 'Mã hoá Base64', tagline: 'Mã hoá và giải mã, giữ đúng tiếng Việt có dấu.' },
   },
   {
     slug: 'json-formatter',
@@ -106,6 +150,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['json formatter', 'json beautifier', 'json validator', 'minify json'],
     icon: '<path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2 2 2 0 0 0-2 2v5a2 2 0 0 1-2 2h-1"/>',
     status: 'live',
+    vi: { name: 'Định dạng JSON', tagline: 'Làm đẹp, rút gọn và kiểm tra JSON.' },
   },
   {
     slug: 'yaml-formatter',
@@ -116,6 +161,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['yaml formatter', 'yaml to json', 'json to yaml', 'yaml validator'],
     icon: '<path d="M4 7V5a1 1 0 0 1 1-1h2"/><path d="M17 4h2a1 1 0 0 1 1 1v2"/><path d="M20 17v2a1 1 0 0 1-1 1h-2"/><path d="M7 20H5a1 1 0 0 1-1-1v-2"/><path d="m8 9 4 4 4-4"/><path d="M12 13v4"/>',
     status: 'live',
+    vi: { name: 'Định dạng YAML', tagline: 'Chỉnh YAML, hoặc chuyển qua lại với JSON.' },
   },
   {
     slug: 'jwt-decoder',
@@ -125,6 +171,7 @@ export const TOOLS: readonly Tool[] = [
     keywords: ['jwt', 'json web token', 'decode'],
     icon: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
     status: 'planned',
+    vi: { name: 'Giải mã JWT', tagline: 'Xem header, payload và thời hạn.' },
   },
 ];
 
@@ -135,6 +182,18 @@ export function toolBySlug(slug: string): Tool {
   const found = TOOLS.find((t) => t.slug === slug);
   if (!found) throw new Error(`Unknown tool: ${slug}`);
   return found;
+}
+
+/** The tool's name, tagline and description in `lang`, falling back to English. */
+export function toolText(tool: Tool, lang: Lang): ToolText {
+  if (lang === 'vi') {
+    return {
+      name: tool.vi.name,
+      tagline: tool.vi.tagline,
+      description: tool.vi.description ?? tool.description,
+    };
+  }
+  return { name: tool.name, tagline: tool.tagline, description: tool.description };
 }
 
 export function toolHref(tool: Tool): string {

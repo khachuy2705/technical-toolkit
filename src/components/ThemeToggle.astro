@@ -4,6 +4,14 @@
  * in BaseLayout before first paint; this component only writes it and swaps the
  * visible icon.
  */
+
+import { CHROME, type Lang } from "../data/i18n";
+
+interface Props {
+  lang?: Lang;
+}
+
+const text = CHROME[Astro.props.lang ?? "en"];
 ---
 
 <button
@@ -11,8 +19,13 @@
   id="theme-toggle"
   class="btn btn--icon"
   data-active="system"
-  aria-label="Change colour theme"
-  title="Change colour theme"
+  aria-label={text.themePrefix}
+  title={text.themePrefix}
+  data-prefix={text.themePrefix}
+  data-hint={text.themeHint}
+  data-name-light={text.themeNames.light}
+  data-name-dark={text.themeNames.dark}
+  data-name-system={text.themeNames.system}
 >
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -96,8 +109,10 @@
       }
 
       button.dataset["active"] = theme;
-      button.title = `Theme: ${theme}`;
-      button.setAttribute("aria-label", `Colour theme: ${theme}. Click to change.`);
+      // The words come from the markup, so the page language decides them.
+      const name = button.dataset[`name${theme[0]!.toUpperCase()}${theme.slice(1)}`] ?? theme;
+      button.title = `${button.dataset["prefix"]}: ${name}`;
+      button.setAttribute("aria-label", `${button.dataset["prefix"]}: ${name}. ${button.dataset["hint"]}`);
     };
 
     apply(read());

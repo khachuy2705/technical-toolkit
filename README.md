@@ -6,7 +6,7 @@ its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
 **hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**,
-**subnet calculator**, **epoch converter**.
+**subnet calculator**, **epoch converter**, **lunar calendar converter** (âm lịch).
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -65,6 +65,7 @@ src/
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
 │   ├── ipv4.ts          Address parsing and subnet arithmetic
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
+│   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
 │   ├── hash.ts          MD5 + SHA-256/512 over bytes

@@ -1,0 +1,533 @@
+---
+/**
+ * The one page on the site written entirely in Vietnamese: the calendar it
+ * converts is Vietnamese, and so are the people who look dates up in it.
+ * `lang="vi"` on the layout switches the shared chrome to match.
+ */
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import {
+  formatDmy,
+  jdFromSolar,
+  leapMonthOf,
+  LUNAR_MAX_YEAR,
+  LUNAR_MIN_YEAR,
+  lunarToSolar,
+  weekdayOfJd,
+  WEEKDAYS_VI,
+  yearCanChi,
+} from "../../lib/lunar";
+
+const SOLAR_ROWS = [
+  { id: "s-lunar", label: "Ngày âm lịch" },
+  { id: "s-spelled", label: "Cách đọc" },
+  { id: "s-day", label: "Ngày" },
+  { id: "s-month", label: "Tháng" },
+  { id: "s-year", label: "Năm" },
+] as const;
+
+const LUNAR_ROWS = [
+  { id: "l-solar", label: "Ngày dương lịch" },
+  { id: "l-weekday", label: "Thứ" },
+  { id: "l-iso", label: "Dạng năm-tháng-ngày" },
+  { id: "l-day", label: "Ngày" },
+] as const;
+
+/**
+ * Tết for the years around now, rendered at build time from the same
+ * conversion the boxes run. The page is rebuilt on every deploy, so the window
+ * never goes stale for long.
+ */
+const THIS_YEAR = new Date().getFullYear();
+const TET_TABLE = Array.from({ length: 21 }, (_, i) => {
+  const year = THIS_YEAR - 5 + i;
+  const tet = lunarToSolar({ day: 1, month: 1, year, leap: false });
+  return {
+    year,
+    canChi: yearCanChi(year),
+    tet: formatDmy(tet),
+    weekday: WEEKDAYS_VI[weekdayOfJd(jdFromSolar(tet))],
+    leap: leapMonthOf(year),
+    current: year === THIS_YEAR,
+  };
+});
+
+const MONTH_OPTIONS = [
+  "Giêng", "Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy", "Tám", "Chín", "Mười", "Mười Một", "Chạp",
+].map((word, i) => `${i + 1} (${word})`);
+---
+
+<ToolLayout slug="lunar-calendar" lang="vi">
+  <section class="card">
+    <div class="qc">
+      <div class="qc__pane">
+        <div class="qc__title">
+          <label for="solar-date">Dương lịch &rarr; Âm lịch</label>
+          <button type="button" class="btn btn--tiny" id="solar-today">Hôm nay</button>
+        </div>
+        <input
+          type="date"
+          id="solar-date"
+          class="big-input"
+          min={`${LUNAR_MIN_YEAR}-01-01`}
+          max={`${LUNAR_MAX_YEAR}-12-31`}
+        />
+        {
+          SOLAR_ROWS.map((row) => (
+            <div class="qc__out">
+              <span class="qc__label">{row.label}</span>
+              <span class="qc__value" data-out={row.id} data-empty="true">&mdash;</span>
+              <button
+                type="button"
+                class="copy-icon"
+                data-out-copy={row.id}
+                aria-label={`Sao chép ${row.label.toLowerCase()}`}
+                title="Sao chép"
+              >
+                <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              </button>
+            </div>
+          ))
+        }
+        <p class="qc__note" id="solar-note" role="status"></p>
+      </div>
+
+      <div class="qc__pane">
+        <div class="qc__title">
+          <span>Âm lịch &rarr; Dương lịch</span>
+          <button type="button" class="btn btn--tiny" id="lunar-today">Hôm nay</button>
+        </div>
+
+        <div class="lunar-fields">
+          <label class="lunar-fields__item">
+            <span class="field__label">Ngày</span>
+            <input type="number" id="lunar-day" min="1" max="30" step="1" inputmode="numeric" />
+          </label>
+          <label class="lunar-fields__item">
+            <span class="field__label">Tháng</span>
+            <select id="lunar-month">
+              {MONTH_OPTIONS.map((label, i) => <option value={String(i + 1)}>{label}</option>)}
+            </select>
+          </label>
+          <label class="lunar-fields__item">
+            <span class="field__label">Năm</span>
+            <input
+              type="number"
+              id="lunar-year"
+              min={LUNAR_MIN_YEAR}
+              max={LUNAR_MAX_YEAR}
+              step="1"
+              inputmode="numeric"
+            />
+          </label>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="lunar-leap" />
+          <span class="check__text">
+            Tháng nhuận
+            <span class="check__sample" id="lunar-leap-hint"></span>
+          </span>
+        </label>
+
+        {
+          LUNAR_ROWS.map((row) => (
+            <div class="qc__out">
+              <span class="qc__label">{row.label}</span>
+              <span class="qc__value" data-out={row.id} data-empty="true">&mdash;</span>
+              <button
+                type="button"
+                class="copy-icon"
+                data-out-copy={row.id}
+                aria-label={`Sao chép ${row.label.toLowerCase()}`}
+                title="Sao chép"
+              >
+                <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              </button>
+            </div>
+          ))
+        }
+        <p class="qc__note" id="lunar-note" role="status"></p>
+      </div>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Nút &ldquo;Hôm nay&rdquo; lấy theo đồng hồ và múi giờ của trình duyệt. Lịch được tính theo giờ
+      Hà Nội (UTC+7) từ năm 1968, và theo UTC+8 &mdash; đúng với lịch được dùng khi đó &mdash; cho
+      các năm trước. Hỗ trợ các năm từ {LUNAR_MIN_YEAR} đến {LUNAR_MAX_YEAR}.
+    </p>
+  </section>
+
+  <section class="card">
+    <div class="qc__head">
+      <h2 class="card__title" id="year-title">Các tháng trong năm</h2>
+      <label class="qc__zone">
+        <span class="field__label">Năm âm lịch</span>
+        <input
+          type="number"
+          id="year-view"
+          class="lunar-year-input"
+          min={LUNAR_MIN_YEAR}
+          max={LUNAR_MAX_YEAR}
+          step="1"
+          inputmode="numeric"
+        />
+      </label>
+    </div>
+
+    <p class="qc__note" id="year-summary" style="margin-bottom:0.75rem"></p>
+
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Các tháng của năm âm lịch đã chọn: Can Chi, ngày mùng 1 theo dương lịch và số ngày trong
+          tháng.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Tháng</th>
+            <th scope="col">Can Chi</th>
+            <th scope="col">Mùng 1 (dương lịch)</th>
+            <th scope="col">Thứ</th>
+            <th scope="col" class="sheet__num">Số ngày</th>
+          </tr>
+        </thead>
+        <tbody id="year-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Ngày Tết từ {THIS_YEAR - 5} đến {THIS_YEAR + 15}</h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Ngày Tết Nguyên Đán theo dương lịch của từng năm, kèm Can Chi và tháng nhuận.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Năm</th>
+            <th scope="col">Can Chi</th>
+            <th scope="col">Mùng 1 Tết</th>
+            <th scope="col">Thứ</th>
+            <th scope="col">Tháng nhuận</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            TET_TABLE.map((row) => (
+              <tr data-common={row.current ? "" : undefined}>
+                <th scope="row" class="sheet__key">{row.year}</th>
+                <td>{row.canChi}</td>
+                <td>{row.tet}</td>
+                <td>{row.weekday}</td>
+                <td>{row.leap === null ? "Không" : `Tháng ${row.leap}`}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose">
+    <h2>Lịch được tính như thế nào</h2>
+    <p>
+      Trang dùng thuật toán của Hồ Ngọc Đức, trình bày trong bài
+      <a href="https://www.xemamlich.uhm.vn/calrules.html" rel="noopener">Thuật toán tính âm lịch</a>.
+      Âm lịch Việt Nam thực chất là âm dương lịch, và được xác định bởi năm quy tắc:
+    </p>
+    <ul>
+      <li>Ngày đầu tiên của tháng âm lịch là ngày chứa điểm Sóc.</li>
+      <li>Năm thường có 12 tháng, năm nhuận có 13 tháng.</li>
+      <li>Đông chí luôn rơi vào tháng 11 âm lịch.</li>
+      <li>
+        Trong năm nhuận, tháng đầu tiên sau Đông chí không chứa Trung khí là tháng nhuận, và mang
+        tên của tháng liền trước nó.
+      </li>
+      <li>Mọi phép tính dựa trên kinh tuyến 105° Đông, tức giờ Hà Nội (UTC+7).</li>
+    </ul>
+
+    <h2>Vì sao lịch Việt Nam đôi khi khác lịch Trung Quốc</h2>
+    <p>
+      Hai lịch dùng cùng quy tắc nhưng tính theo hai kinh tuyến khác nhau: Trung Quốc tính theo
+      UTC+8. Điểm Sóc lúc 23 giờ 30 ở Hà Nội đã là 0 giờ 30 ngày hôm sau ở Bắc Kinh, nên tháng mới
+      của hai lịch bắt đầu lệch nhau một ngày. Vì thế Tết Mậu Thân 1968 ở Việt Nam là ngày 29/1,
+      còn ở Trung Quốc là 30/1. Năm 1985 hai lịch còn lệch nhau cả một tháng, do ranh giới các tháng
+      xê dịch đủ để thay đổi tháng nào chứa Đông chí.
+    </p>
+
+    <h2>Các năm trước 1968</h2>
+    <p>
+      Miền Bắc chỉ chuyển âm lịch sang giờ UTC+7 từ năm Mậu Thân 1968. Trước đó, lịch được dùng trên
+      thực tế tính theo UTC+8, nên trang này cũng tính theo UTC+8 cho các năm trước 1968. Điều này
+      quan trọng nhất với việc người ta hay tra: ngày sinh âm lịch của những năm 1940, 1950. Tháng
+      cuối cùng của năm 1967 kết thúc đúng lúc Tết 1968 bắt đầu, nên hai giai đoạn nối liền, không
+      hở cũng không chồng ngày. Miền Nam vẫn dùng lịch UTC+8 đến năm 1975; trang này theo lịch miền
+      Bắc cho toàn bộ giai đoạn đó.
+    </p>
+
+    <h2>Độ chính xác</h2>
+    <p>
+      Phần tính thiên văn trong bài đã được tác giả đơn giản hoá, và chính tác giả cũng nói rõ điều
+      đó. Khi đối chiếu từng ngày với bảng lịch độ chính xác cao của tác giả cho giai đoạn
+      1900&ndash;2199, trang này khớp 99,64% số ngày, khớp mọi tháng nhuận, và khớp tuyệt đối từ năm
+      1968 đến 2053. Phần còn lại là 13 lần ngày đầu tháng lệch một ngày, rơi vào các tháng có điểm
+      Sóc chỉ cách nửa đêm vài phút, trong các năm 1906, 1914, 1916, 1920, 1925, 2054, 2072, 2077,
+      2130, 2150, 2159, 2175 và 2199. Nếu ngày cần tra rơi vào một trong các tháng đó, hãy đối chiếu
+      thêm với lịch in.
+    </p>
+
+    <h2>Những chỗ khác với mã mẫu trong bài</h2>
+    <ul>
+      <li>
+        Ngày nhập vào được kiểm tra theo độ dài thật của tháng. Mã mẫu âm thầm biến &ldquo;ngày
+        30&rdquo; của tháng thiếu thành mùng 1 tháng sau.
+      </li>
+      <li>Đánh dấu nhuận cho một tháng không phải tháng nhuận sẽ bị báo lỗi, không bị bỏ qua.</li>
+      <li>
+        Tháng chứa một ngày được tìm bằng cách dò cho đến khi đúng. Cách ước lượng một bước của mã
+        mẫu cho ra &ldquo;mùng 0&rdquo; vào ngày 7/5/2054.
+      </li>
+      <li>Tháng nhuận nằm ngay sau tháng 12 được đánh số 12; mã mẫu sẽ gọi nó là tháng 0.</li>
+    </ul>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    dayCanChi,
+    formatDmy,
+    formatLunar,
+    jdFromSolar,
+    leapMonthOf,
+    LUNAR_MAX_YEAR,
+    LUNAR_MIN_YEAR,
+    LunarError,
+    lunarMonthSpan,
+    lunarToSolar,
+    lunarYearMonths,
+    monthCanChi,
+    solarToLunar,
+    spellLunar,
+    weekdayOfJd,
+    WEEKDAYS_VI,
+    yearCanChi,
+    type SolarDate,
+  } from "../../lib/lunar";
+  import { all, attachCopy, el } from "../../lib/ui";
+
+  const solarInput = el<HTMLInputElement>("#solar-date");
+  const solarNote = el<HTMLElement>("#solar-note");
+  const lunarDay = el<HTMLInputElement>("#lunar-day");
+  const lunarMonth = el<HTMLSelectElement>("#lunar-month");
+  const lunarYear = el<HTMLInputElement>("#lunar-year");
+  const lunarLeap = el<HTMLInputElement>("#lunar-leap");
+  const leapHint = el<HTMLElement>("#lunar-leap-hint");
+  const lunarNote = el<HTMLElement>("#lunar-note");
+  const yearView = el<HTMLInputElement>("#year-view");
+  const yearTitle = el<HTMLElement>("#year-title");
+  const yearSummary = el<HTMLElement>("#year-summary");
+  const yearRows = el<HTMLTableSectionElement>("#year-rows");
+
+  const outNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-out]").map((node) => [node.dataset["out"]!, node]),
+  );
+  const outValues = new Map<string, string>();
+
+  function out(id: string, value: string | null): void {
+    const node = outNodes.get(id);
+    if (value === null) outValues.delete(id);
+    else outValues.set(id, value);
+    if (!node) return;
+    node.textContent = value ?? "—";
+    if (value === null) node.dataset["empty"] = "true";
+    else delete node.dataset["empty"];
+  }
+
+  function note(node: HTMLElement, text: string, warn = false): void {
+    node.textContent = text;
+    if (warn) node.dataset["warn"] = "";
+    else delete node.dataset["warn"];
+  }
+
+  // The lunar library's own refusals are Vietnamese and shown as they are;
+  // anything else that throws is a bug, and gets a Vietnamese sentence rather
+  // than an English engine message.
+  const message = (error: unknown) =>
+    error instanceof LunarError ? error.message : "Không tính được ngày này.";
+
+  const lengthText = (length: number) =>
+    `${length} ngày (${length === 30 ? "tháng đủ" : "tháng thiếu"})`;
+
+  /** Today by the browser's own clock and zone — the date on the wall calendar. */
+  function today(): SolarDate {
+    const now = new Date();
+    return { day: now.getDate(), month: now.getMonth() + 1, year: now.getFullYear() };
+  }
+
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  const isoOf = (d: SolarDate) => `${pad(d.year, 4)}-${pad(d.month)}-${pad(d.day)}`;
+
+  /* ----------------------------------------------------------- solar → lunar */
+
+  const SOLAR_IDS = ["s-lunar", "s-spelled", "s-day", "s-month", "s-year"];
+
+  function runSolar(): void {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(solarInput.value);
+    if (!match) {
+      for (const id of SOLAR_IDS) out(id, null);
+      const empty = solarInput.value === "";
+      note(solarNote, empty ? "Hãy chọn một ngày." : "Ngày chưa đầy đủ.", !empty);
+      return;
+    }
+    const date = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+
+    try {
+      const lunar = solarToLunar(date);
+      const jd = jdFromSolar(date);
+      out("s-lunar", formatLunar(lunar));
+      out("s-spelled", spellLunar(lunar));
+      out("s-day", dayCanChi(jd));
+      out("s-month", monthCanChi(lunar.month, lunar.year, lunar.leap));
+      out("s-year", yearCanChi(lunar.year));
+
+      const length = lunarMonthSpan(lunar.month, lunar.year, lunar.leap).length;
+      note(solarNote, `${WEEKDAYS_VI[weekdayOfJd(jd)]}. Tháng âm lịch này có ${lengthText(length)}.`);
+    } catch (error) {
+      for (const id of SOLAR_IDS) out(id, null);
+      note(solarNote, message(error), true);
+    }
+  }
+
+  /* ----------------------------------------------------------- lunar → solar */
+
+  const LUNAR_IDS = ["l-solar", "l-weekday", "l-iso", "l-day"];
+
+  function readInt(input: HTMLInputElement): number | null {
+    return /^\d+$/.test(input.value.trim()) ? Number(input.value) : null;
+  }
+
+  function runLunar(): void {
+    const day = readInt(lunarDay);
+    const month = Number(lunarMonth.value);
+    const year = readInt(lunarYear);
+
+    // The leap box only means something for the one month that has a leap
+    // twin, so it is disabled everywhere else rather than left to be refused.
+    let leapMonth: number | null = null;
+    if (year !== null && year >= LUNAR_MIN_YEAR && year <= LUNAR_MAX_YEAR) {
+      leapMonth = leapMonthOf(year);
+      leapHint.textContent =
+        leapMonth === null
+          ? `năm ${yearCanChi(year)} ${year} không có tháng nhuận`
+          : `năm ${yearCanChi(year)} ${year} nhuận tháng ${leapMonth}`;
+    } else {
+      leapHint.textContent = "";
+    }
+    lunarLeap.disabled = leapMonth !== month;
+    if (lunarLeap.disabled) lunarLeap.checked = false;
+
+    if (day === null || year === null) {
+      for (const id of LUNAR_IDS) out(id, null);
+      note(lunarNote, "Hãy nhập ngày và năm.");
+      return;
+    }
+
+    try {
+      const leap = lunarLeap.checked;
+      const solar = lunarToSolar({ day, month, year, leap });
+      const jd = jdFromSolar(solar);
+      out("l-solar", formatDmy(solar));
+      out("l-weekday", WEEKDAYS_VI[weekdayOfJd(jd)]!);
+      out("l-iso", isoOf(solar));
+      out("l-day", dayCanChi(jd));
+      const length = lunarMonthSpan(month, year, leap).length;
+      note(lunarNote, `${spellLunar({ day, month, year, leap })}. Tháng này có ${lengthText(length)}.`);
+    } catch (error) {
+      for (const id of LUNAR_IDS) out(id, null);
+      note(lunarNote, message(error), true);
+    }
+  }
+
+  /* ---------------------------------------------------------- year overview */
+
+  function cell(text: string, className?: string, tag: "td" | "th" = "td"): HTMLElement {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    if (className) node.className = className;
+    if (tag === "th") node.setAttribute("scope", "row");
+    return node;
+  }
+
+  function runYear(): void {
+    const year = readInt(yearView);
+    yearRows.replaceChildren();
+    if (year === null || year < LUNAR_MIN_YEAR || year > LUNAR_MAX_YEAR) {
+      yearTitle.textContent = "Các tháng trong năm";
+      note(yearSummary, `Hãy nhập một năm từ ${LUNAR_MIN_YEAR} đến ${LUNAR_MAX_YEAR}.`, year !== null);
+      return;
+    }
+
+    const rows = lunarYearMonths(year);
+    const leapMonth = leapMonthOf(year);
+    const days = rows.reduce((sum, row) => sum + row.length, 0);
+    yearTitle.textContent = `Năm ${yearCanChi(year)} ${year}`;
+    note(
+      yearSummary,
+      `Tết ngày ${formatDmy(rows[0]!.start)} · ${rows.length} tháng, ${days} ngày · ` +
+        (leapMonth === null ? "không có tháng nhuận" : `nhuận tháng ${leapMonth}`),
+    );
+
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      if (row.leap) tr.dataset["common"] = "";
+      const jd = jdFromSolar(row.start);
+      tr.append(
+        cell(`${row.month}${row.leap ? " nhuận" : ""}`, "sheet__key", "th"),
+        cell(monthCanChi(row.month, year, row.leap)),
+        cell(formatDmy(row.start)),
+        cell(WEEKDAYS_VI[weekdayOfJd(jd)]!),
+        cell(`${row.length} · ${row.length === 30 ? "đủ" : "thiếu"}`, "sheet__num"),
+      );
+      yearRows.append(tr);
+    }
+  }
+
+  /* ------------------------------------------------------------------ wiring */
+
+  function setSolarToday(): void {
+    solarInput.value = isoOf(today());
+    runSolar();
+  }
+
+  function setLunarToday(): void {
+    const lunar = solarToLunar(today());
+    lunarDay.value = String(lunar.day);
+    lunarMonth.value = String(lunar.month);
+    lunarYear.value = String(lunar.year);
+    runLunar();
+    // Only possible once the year is known, which runLunar has just worked out.
+    lunarLeap.checked = lunar.leap && !lunarLeap.disabled;
+    runLunar();
+  }
+
+  solarInput.addEventListener("input", runSolar);
+  for (const control of [lunarDay, lunarYear]) control.addEventListener("input", runLunar);
+  for (const control of [lunarMonth, lunarLeap]) control.addEventListener("change", runLunar);
+  yearView.addEventListener("input", runYear);
+
+  el<HTMLButtonElement>("#solar-today").addEventListener("click", setSolarToday);
+  el<HTMLButtonElement>("#lunar-today").addEventListener("click", setLunarToday);
+
+  for (const button of all<HTMLButtonElement>("[data-out-copy]")) {
+    const id = button.dataset["outCopy"]!;
+    attachCopy(button, () => outValues.get(id) ?? "");
+  }
+
+  setSolarToday();
+  setLunarToday();
+  yearView.value = String(solarToLunar(today()).year);
+  runYear();
+</script>

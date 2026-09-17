@@ -1348,6 +1348,39 @@ select {
   color: var(--strength-1);
 }
 
+/* --------------------------------------------------------------------------- Lunar calendar */
+
+/* Day and year are short numbers; the month select carries the Giêng/Chạp labels. */
+.lunar-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 4.5rem) minmax(0, 1fr) minmax(0, 6rem);
+  gap: 0.5rem;
+}
+
+.lunar-fields__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.lunar-fields input,
+.lunar-year-input {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+}
+
+.lunar-year-input {
+  width: 8rem;
+}
+
 /* --------------------------------------------------------------------------- Hash rows */
 
 .hash-list {

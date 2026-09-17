@@ -1,8 +1,15 @@
 ---
-import { LIVE_TOOLS, toolHref } from "../data/tools";
+import { LIVE_TOOLS, toolHref, toolText } from "../data/tools";
+import { CHROME, type Lang } from "../data/i18n";
 import { SITE } from "../data/site";
 import ThemeToggle from "./ThemeToggle.astro";
 
+interface Props {
+  lang?: Lang;
+}
+
+const lang = Astro.props.lang ?? "en";
+const text = CHROME[lang];
 const path = Astro.url.pathname;
 const isCurrent = (href: string) => path === href || path === href.replace(/\/$/, "");
 ---
@@ -29,7 +36,7 @@ const isCurrent = (href: string) => path === href || path === href.replace(/\/$/
       {SITE.name}
     </a>
 
-    <nav class="site-nav" aria-label="Main">
+    <nav class="site-nav" aria-label={text.mainNav}>
       {
         LIVE_TOOLS.map((tool) => (
           <a
@@ -37,12 +44,12 @@ const isCurrent = (href: string) => path === href || path === href.replace(/\/$/
             href={toolHref(tool)}
             aria-current={isCurrent(toolHref(tool)) ? "page" : undefined}
           >
-            {tool.name.replace(" Generator", "")}
+            {lang === "en" ? tool.name.replace(" Generator", "") : toolText(tool, lang).name}
           </a>
         ))
       }
-      <a href="/about/" aria-current={isCurrent("/about/") ? "page" : undefined}>About</a>
-      <ThemeToggle />
+      <a href="/about/" aria-current={isCurrent("/about/") ? "page" : undefined}>{text.about}</a>
+      <ThemeToggle lang={lang} />
     </nav>
   </div>
 </header>

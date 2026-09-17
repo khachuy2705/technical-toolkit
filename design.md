@@ -59,6 +59,7 @@ Do not bump it past 6 until `astro check` supports it.
 src/
 ├── data/                  Declarative content — no behaviour
 │   ├── tools.ts           THE TOOL REGISTRY. See §5.
+│   ├── i18n.ts            Chrome strings in English and Vietnamese. See §5.
 │   ├── site.ts            Site name, canonical URL, description
 │   └── icons.ts           Shared UI icon path data
 │
@@ -70,6 +71,7 @@ src/
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── ipv4.ts            Address parsing and subnet arithmetic
 │   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
+│   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -112,13 +114,14 @@ src/
 │       ├── json-formatter.astro
 │       ├── yaml-formatter.astro
 │       ├── subnet-calculator.astro
-│       └── epoch-converter.astro
+│       ├── epoch-converter.astro
+│       └── lunar-calendar.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 2265 lines of logic in `lib/`, 582 of components and layouts, 2680 of pages, 1621 of
-CSS, 1094 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 2702 lines of logic in `lib/`, 582 of components and layouts, 3207 of pages, 1654 of
+CSS, 1221 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -166,6 +169,7 @@ interface Tool {
   keywords: readonly string[];
   icon: string;         // inner markup of a 24×24 stroked SVG
   status: 'live' | 'planned';
+  vi: { name: string; tagline: string; description?: string };  // see "Page language" below
 }
 ```
 
@@ -188,7 +192,21 @@ sitemap. It exists so the roadmap is visible without shipping a dead link.
 3. Put non-trivial logic in `src/lib/<tool>.ts` as pure functions.
 4. Add checks to `scripts/verify.ts`.
 
-Nothing else needs editing. The home page, nav, sitemap and cross-links pick it up.
+Nothing else needs editing. The home page, nav, sitemap and cross-links pick it up. Give the
+entry a `vi` name and tagline too — the Vietnamese page lists every tool in its nav and footer.
+
+### Page language
+
+The site is English. A page can opt into Vietnamese by passing `lang="vi"` to `ToolLayout` (or
+`BaseLayout`), and everything the layout draws follows: `<html lang>`, the header nav (tool names
+come from each registry entry's `vi` block via `toolText`), the footer, the breadcrumb, the privacy
+badge, the "more tools" cards, the theme toggle's labels, and the JSON-LD `inLanguage`. The chrome
+strings live in `src/data/i18n.ts`. The copy buttons' "Copied" feedback is chosen in `lib/ui.ts`
+from `<html lang>`, so it needs no wiring per page.
+
+Only the lunar calendar uses it today (§6.9). The page content itself is written directly in the
+page; there is no message catalogue, because no page exists in two languages. The brand name,
+*Technical Toolkit*, stays as it is in both.
 
 ---
 
@@ -437,7 +455,56 @@ them: a check pins `1970-01-01` in `Asia/Ho_Chi_Minh` at **+08:00**, which is wh
 before 1975, precisely because "apply the current offset to every date" is the shortcut that makes
 a converter wrong about anything historical.
 
-### 6.9 Shared tool chrome
+### 6.9 Lunar calendar converter — `/tools/lunar-calendar/`
+
+**The page is entirely in Vietnamese** — content, chrome, notes and error messages — because the
+calendar and the people who look dates up in it are. `lib/lunar.ts` therefore throws its refusals
+as `LunarError` with Vietnamese messages, and the page shows only those verbatim; anything else
+that throws becomes a generic Vietnamese sentence rather than an English engine message.
+
+Converts between the Vietnamese lunisolar calendar (âm lịch) and the Gregorian one, following
+Hồ Ngọc Đức's published algorithm
+([Thuật toán tính âm lịch](https://www.xemamlich.uhm.vn/calrules.html)). Two boxes side by side
+— a date picker that answers with the lunar date, and day / month / year / leap fields that answer
+with the solar date — both opening on today by the browser's clock. Each lunar result is also
+spelled the way it is said aloud (*Mùng 7 tháng Tám năm Bính Ngọ*) and carries the Can Chi names
+of its day, month and year. Below them, every month of a chosen lunar year with its start date and
+length, and a build-time table of Tết dates for the years around now.
+
+The astronomy — truncated series for the new moon and the sun's longitude — is the article's,
+reimplemented rather than copied. Five departures from its sample code are deliberate:
+
+- **Day 30 of a 29-day month is refused.** The sample turns it into the first day of the next
+  month without a word.
+- **A leap flag must name the real leap month.** The sample ignores the flag in a common year.
+  On the page, the leap checkbox is disabled for every month but the year's leap month.
+- **The month containing a date is found by search.** The sample estimates it from the mean
+  lunation and steps back at most once; near some boundaries that is a whole month off, and it
+  reports "day 0" (7 May 2054 is one).
+- **A leap month after month 12 is numbered 12.** The sample computes `leapOff - 2` and only wraps
+  negatives, so it would call it month 0. None occurs in range, so the check is on the numbering
+  function directly.
+- **Lunar years before 1968 are computed for UTC+8.** North Vietnam moved the calendar to UTC+7
+  from lunar year 1968; before that the calendar in use followed the UTC+8 computation. A single
+  meridian throughout would convert 1950s birthdays against a calendar nobody printed. The last
+  month of 1967 is cut where Tết 1968 begins, so the two periods join exactly.
+
+**How it was checked.** The author also publishes a table-driven version of his calendar
+(`amlich-hnd.js`, precomputed with his full-precision program for 1800–2199). Its licence allows
+personal, non-commercial use only, so **it is not in this repository** — not the file and not the
+tables. It was used once, locally, as an oracle. Result over 1900–2199: 99.64% of days agree,
+every leap month agrees, lunar→solar→lunar round-trips on every day, and 1968–2053 agrees
+exactly. The rest are thirteen single month boundaries where the new moon falls within minutes of
+midnight and the simplified series cannot tell which side: 1906, 1914, 1916, 1920, 1925, 2054,
+2072, 2077, 2130, 2150, 2159, 2175, 2199. The page lists them. Before 1900 the table follows
+older, pre-modern calendar rules and the agreement collapses, which is why the range starts there.
+
+The suite pins only independent facts: Tết dates from public record, leap months, the article's
+own 2004 example, the 1968 and 1985 Hanoi/Beijing splits, the 2033 leap month 11, Can Chi of known
+days (Tết 2024 was a Giáp Thìn day, month and year), and a round trip over all 109,573 days of
+the range.
+
+### 6.10 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
 `IoPanel` and `lib/textio.ts`:
@@ -468,7 +535,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.10 Site-wide
+### 6.11 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
@@ -584,7 +651,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 311 checks, Node, no browser
+npm run verify   # 380 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -652,6 +719,9 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **Wall time to epoch** — the New York spring-forward gap and fall-back overlap, Lord Howe
   Island's thirty-minute shift, Saigon's +07:06:30 local mean time, impossible dates refused, and
   a round trip from instant to wall time and back in six zones every 7h13m across three years.
+- **Lunar calendar** — Tết dates, leap months and Can Chi against public record, the Hanoi/Beijing
+  splits of 1968 and 1985, the 1967/1968 era join, every refusal by name, and a solar→lunar→solar
+  round trip over every day from 1900 to 2199 (about 0.4 s).
 - **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
   in full, because both tables are rendered at build time and a regression would hand every
   visitor a wrong reference.
@@ -669,7 +739,7 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 22.1 KB (4.8 KB) | every page |
+| CSS | 22.5 KB (4.8 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
 | Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
@@ -680,6 +750,7 @@ Bundle sizes as built (gzip in brackets):
 | JSON page script | 2.1 KB (1.1 KB) | JSON page |
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
 | Epoch page script | 11.6 KB (4.8 KB) | epoch page |
+| Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
@@ -725,8 +796,9 @@ Honest list, in rough order of how much they matter:
    offer.
 7. **CSP allows `'unsafe-inline'` for scripts.** Reasoning in §8.5; the tradeoff is deliberate,
    not an oversight.
-8. **No internationalisation.** The UI is English-only, with no structure in place for anything
-   else.
+8. **Localisation is one page deep.** The chrome can render in Vietnamese (§5, *Page language*),
+   but only the lunar calendar page does, and its nav and footer link to pages that are English.
+   There is no language switcher and no second-language version of any page.
 9. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
    such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
    word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
@@ -739,5 +811,10 @@ Honest list, in rough order of how much they matter:
     wrongly, and the page has no way to know. Separately, date strings containing letters still go
     through `Date.parse`, which is implementation-defined beyond ISO 8601; the letterless cases are
     refused outright (§6.8) but `"Sept 17 2026"` may parse in one engine and not another.
-12. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
+12. **The lunar calendar inherits the article's precision.** Thirteen month boundaries in
+    1900–2199 land a day off the author's full-precision tables (§6.9), four of them in this
+    century's second half. A fuller new-moon series (Meeus ch. 49) would likely close them, at the
+    cost of no longer being the algorithm the page cites. South Vietnam's 1968–1975 calendar, which
+    stayed on UTC+8, is not modelled.
+13. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
     behind them.

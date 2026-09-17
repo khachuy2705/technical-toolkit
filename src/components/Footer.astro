@@ -1,5 +1,12 @@
 ---
 import { SITE } from "../data/site";
+import { CHROME, type Lang } from "../data/i18n";
+
+interface Props {
+  lang?: Lang;
+}
+
+const text = CHROME[Astro.props.lang ?? "en"];
 
 const year = new Date().getFullYear();
 ---
@@ -7,9 +14,9 @@ const year = new Date().getFullYear();
 <footer class="site-footer">
   <div class="container site-footer__inner">
     <span>&copy; {year} {SITE.name}</span>
-    <span>Everything runs in your browser. No data leaves this page.</span>
+    <span>{text.footerNote}</span>
     <span class="site-footer__spacer"></span>
-    <a href="/about/">About</a>
-    <a href="/privacy/">Privacy</a>
+    <a href="/about/">{text.about}</a>
+    <a href="/privacy/">{text.privacy}</a>
   </div>
 </footer>

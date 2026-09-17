@@ -46,6 +46,28 @@ import {
   prefixFromMask,
   toBinary,
 } from "../src/lib/ipv4";
+import {
+  dayCanChi,
+  eraOffset,
+  formatDmy,
+  formatLunar,
+  jdFromSolar,
+  leapMonthNumber,
+  leapMonthOf,
+  LUNAR_MIN_YEAR,
+  LunarError,
+  lunarMonthSpan,
+  lunarToSolar,
+  lunarYearMonths,
+  monthCanChi,
+  solarFromJd,
+  solarToLunar,
+  solarToLunarAt,
+  spellLunar,
+  weekdayOfJd,
+  WEEKDAYS_VI,
+  yearCanChi,
+} from "../src/lib/lunar";
 
 export type Check = (name: string, condition: boolean, detail?: string) => void;
 
@@ -701,6 +723,114 @@ export async function runToolChecks(check: Check): Promise<void> {
 
     check("the epoch box accepts plain and fractional numbers", ["1758086602", "-1", "1758086602.5", " 42 "].every(isEpochText));
     check("and nothing else", !["", "2026-09-17", "1e9", "0x10", "1.2.3", "12 34"].some(isEpochText));
+  }
+
+  console.log("\n-- lunar calendar --");
+  {
+    // Tết, as printed in Vietnam. Independent of this code: public record.
+    const TET: readonly [number, string][] = [
+      [1945, "13/2/1945"], [1954, "3/2/1954"], [1968, "29/1/1968"], [1975, "11/2/1975"],
+      [1985, "21/1/1985"], [2000, "5/2/2000"], [2004, "22/1/2004"], [2007, "17/2/2007"],
+      [2020, "25/1/2020"], [2021, "12/2/2021"], [2022, "1/2/2022"], [2023, "22/1/2023"],
+      [2024, "10/2/2024"], [2025, "29/1/2025"], [2026, "17/2/2026"], [2027, "6/2/2027"],
+      [2030, "2/2/2030"], [2033, "31/1/2033"], [2034, "19/2/2034"],
+    ];
+    for (const [year, expected] of TET) {
+      const actual = formatDmy(lunarToSolar({ day: 1, month: 1, year, leap: false }));
+      check(`Tết ${year} is ${expected}`, actual === expected, actual);
+    }
+
+    const LEAPS: readonly [number, number | null][] = [
+      [2004, 2], [2006, 7], [2009, 5], [2012, 4], [2014, 9], [2017, 6], [2020, 4],
+      [2023, 2], [2024, null], [2025, 6], [2026, null], [2028, 5], [2031, 3], [2033, 11],
+      [2148, 1],
+    ];
+    for (const [year, month] of LEAPS) {
+      check(`${year} leap month is ${month ?? "none"}`, leapMonthOf(year) === month, String(leapMonthOf(year)));
+    }
+
+    // The article's own worked example: 2004 has a leap month 2, running
+    // 21/3/2004 to 18/4/2004.
+    const leap2004 = lunarMonthSpan(2, 2004, true);
+    check("leap month 2 of 2004 starts 21/3/2004", formatDmy(solarFromJd(leap2004.start)) === "21/3/2004", formatDmy(solarFromJd(leap2004.start)));
+    check("and ends 18/4/2004", formatDmy(solarFromJd(leap2004.start + leap2004.length - 1)) === "18/4/2004");
+
+    // The meridian is the whole difference between the two calendars. Tết 1968
+    // came a day earlier in Hanoi, and in 1985 the two were a month apart.
+    check("29/1/1968 is Tết at UTC+7", JSON.stringify(solarToLunarAt({ day: 29, month: 1, year: 1968 }, 7)) === '{"day":1,"month":1,"year":1968,"leap":false}');
+    check("and still the old year at UTC+8", JSON.stringify(solarToLunarAt({ day: 29, month: 1, year: 1968 }, 8)) === '{"day":30,"month":12,"year":1967,"leap":false}');
+    check("21/1/1985 is Tết at UTC+7 but month 12 at UTC+8", solarToLunarAt({ day: 21, month: 1, year: 1985 }, 7).month === 1 && solarToLunarAt({ day: 21, month: 1, year: 1985 }, 8).month === 12);
+
+    // The era switch: 1967 is computed at UTC+8, so its last month has to stop
+    // where Tết 1968 (UTC+7) begins rather than overlap it by a day.
+    const last1967 = lunarMonthSpan(12, 1967, false);
+    check("month 12 of 1967 ends the day before Tết 1968", formatDmy(solarFromJd(last1967.start + last1967.length)) === "29/1/1968", formatDmy(solarFromJd(last1967.start + last1967.length)));
+    check("pre-1968 dates use the calendar then in use", eraOffset(1967) === 8 && eraOffset(1968) === 7);
+    check("28/1/1968 is the last day of 1967", formatLunar(solarToLunar({ day: 28, month: 1, year: 1968 })) === "29/12/1967", formatLunar(solarToLunar({ day: 28, month: 1, year: 1968 })));
+
+    // The sample code estimates the month once and steps back at most once;
+    // on 7 May 2054 that lands a lunation late and reports day 0.
+    const may2054 = solarToLunar({ day: 7, month: 5, year: 2054 });
+    check("no date is ever day 0", may2054.day >= 1, formatLunar(may2054));
+
+    check("the leap month after month 12 is numbered 12, not 0", leapMonthNumber(2) === 12, String(leapMonthNumber(2)));
+    check("the leap month after month 11 is 11", leapMonthNumber(1) === 11);
+    check("offset 4 after month 11 is a leap month 2", leapMonthNumber(4) === 2);
+
+    const leap11 = lunarToSolar({ day: 1, month: 11, year: 2033, leap: true });
+    check("leap month 11 of 2033 starts 22/12/2033", formatDmy(leap11) === "22/12/2033", formatDmy(leap11));
+    check("2033's winter solstice month is the regular month 11", solarToLunar({ day: 21, month: 12, year: 2033 }).leap === false);
+
+    // Every day of the supported range, both ways. Solar to lunar to solar has
+    // to land on the same day, which is what makes the two boxes trustworthy
+    // together — and it covers every month length and every leap month.
+    let broken: string | null = null;
+    for (let jd = jdFromSolar({ day: 1, month: 1, year: 1900 }); jd <= jdFromSolar({ day: 31, month: 12, year: 2199 }) && broken === null; jd += 1) {
+      const lunar = solarToLunar(solarFromJd(jd));
+      if (lunar.year < LUNAR_MIN_YEAR) continue;
+      try {
+        if (jdFromSolar(lunarToSolar(lunar)) !== jd) broken = `${formatDmy(solarFromJd(jd))} via ${formatLunar(lunar)}`;
+      } catch (error) {
+        broken = `${formatDmy(solarFromJd(jd))} via ${formatLunar(lunar)}: ${(error as Error).message}`;
+      }
+    }
+    check("every day 1900-2199 round-trips", broken === null, broken ?? "");
+
+    check("month lengths are only ever 29 or 30", Array.from({ length: 300 }, (_, i) => 1900 + i).every((y) => lunarYearMonths(y).every((r) => r.length === 29 || r.length === 30)));
+    check("a leap year lists 13 months, a common year 12", lunarYearMonths(2025).length === 13 && lunarYearMonths(2026).length === 12);
+
+    // Refusals, each by name. The sample code accepts all of these silently.
+    const REFUSED: readonly [string, () => unknown, RegExp][] = [
+      ["day 30 of a 29-day month", () => lunarToSolar({ day: 30, month: 2, year: 2025, leap: false }), /chỉ có 29 ngày/],
+      ["a leap flag on the wrong month", () => lunarToSolar({ day: 1, month: 3, year: 2025, leap: true }), /Năm 2025 nhuận tháng 6, không phải tháng 3/],
+      ["a leap flag in a common year", () => lunarToSolar({ day: 1, month: 1, year: 2024, leap: true }), /Năm 2024 không có tháng nhuận/],
+      ["a leap 11 claimed for the year after it", () => lunarToSolar({ day: 1, month: 11, year: 2034, leap: true }), /Năm 2034 không có tháng nhuận/],
+      ["month 13", () => lunarToSolar({ day: 1, month: 13, year: 2025, leap: false }), /Không có tháng 13 âm lịch/],
+      ["day 0", () => lunarToSolar({ day: 0, month: 1, year: 2025, leap: false }), /không có ngày 0/],
+      ["a year before the range", () => solarToLunar({ day: 1, month: 1, year: 1899 }), /1900/],
+      ["a year after the range", () => lunarToSolar({ day: 1, month: 1, year: 2200, leap: false }), /2199/],
+    ];
+    for (const [name, attempt, message] of REFUSED) {
+      let said = "";
+      let typed = false;
+      try { attempt(); } catch (error) { said = (error as Error).message; typed = error instanceof LunarError; }
+      // The page shows only LunarError messages verbatim, so the type matters.
+      check(`refuses ${name}`, message.test(said) && typed, said || "(accepted)");
+    }
+
+    // Can Chi, from the article and from well-known dates. Tết 2024 was a
+    // Giáp Thìn day in a Bính Dần month of a Giáp Thìn year.
+    const tet2024 = jdFromSolar({ day: 10, month: 2, year: 2024 });
+    check("Tết 2024 was a Giáp Thìn day", dayCanChi(tet2024) === "Giáp Thìn", dayCanChi(tet2024));
+    check("in a Bính Dần month", monthCanChi(1, 2024) === "Bính Dần", monthCanChi(1, 2024));
+    check("of a Giáp Thìn year", yearCanChi(2024) === "Giáp Thìn");
+    check("and it was a Saturday", WEEKDAYS_VI[weekdayOfJd(tet2024)] === "Thứ Bảy", WEEKDAYS_VI[weekdayOfJd(tet2024)]);
+    check("month 3 of 2004 is Mậu Thìn (the article's example)", monthCanChi(3, 2004) === "Mậu Thìn", monthCanChi(3, 2004));
+    check("leap month 2 of 2004 is Đinh Mão nhuận", monthCanChi(2, 2004, true) === "Đinh Mão nhuận");
+    check("years: Mậu Thân 1968, Ất Tỵ 2025, Bính Ngọ 2026", yearCanChi(1968) === "Mậu Thân" && yearCanChi(2025) === "Ất Tỵ" && yearCanChi(2026) === "Bính Ngọ");
+    check("spelled the way it is said", spellLunar({ day: 7, month: 8, year: 2026, leap: false }) === "Mùng 7 tháng Tám năm Bính Ngọ", spellLunar({ day: 7, month: 8, year: 2026, leap: false }));
+    check("with Giêng, Chạp and nhuận", spellLunar({ day: 1, month: 1, year: 2025, leap: false }) === "Mùng 1 tháng Giêng năm Ất Tỵ" && spellLunar({ day: 23, month: 12, year: 2025, leap: false }) === "Ngày 23 tháng Chạp năm Ất Tỵ" && spellLunar({ day: 15, month: 6, year: 2025, leap: true }) === "Ngày 15 tháng Sáu nhuận năm Ất Tỵ");
+    check("17/9/2026 is 7/8 Bính Ngọ", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })) === "7/8/2026", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })));
   }
 
   console.log("\n-- yaml --");
