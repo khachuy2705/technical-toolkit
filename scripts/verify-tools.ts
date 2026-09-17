@@ -11,6 +11,24 @@ import { findErrorIndex, formatJson } from "../src/lib/jsonfmt";
 import { convertYaml } from "../src/lib/yamlfmt";
 import { lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
+  availableZones,
+  civilFromDays,
+  dayOfYear,
+  daysFromCivil,
+  detectUnit,
+  formatSpan,
+  formatZoned,
+  isLeapYear,
+  isoWeek,
+  localZone,
+  parseMoment,
+  relativeToNow,
+  unitStrings,
+  weekdayIndex,
+  WEEKDAYS,
+  zonedParts,
+} from "../src/lib/epoch";
+import {
   classifyAddress,
   describeNetwork,
   formatCidr,
@@ -372,6 +390,243 @@ export async function runToolChecks(check: Check): Promise<void> {
 
     check("binary view groups by octet", toBinary(parseIpv4("192.168.1.0")) === "11000000.10101000.00000001.00000000", toBinary(parseIpv4("192.168.1.0")));
   }
+  console.log("\n-- epoch: unit detection --");
+  {
+    // The boundaries are the digit counts a present-day timestamp has in each
+    // unit; the in-between lengths must round down to the coarser one.
+    const DIGITS: readonly [number, string][] = [
+      [1, "seconds"], [9, "seconds"], [10, "seconds"],
+      [11, "milliseconds"], [13, "milliseconds"],
+      [14, "microseconds"], [16, "microseconds"],
+      [17, "nanoseconds"], [19, "nanoseconds"], [25, "nanoseconds"],
+    ];
+    for (const [digits, unit] of DIGITS) {
+      check(`${digits} digits reads as ${unit}`, detectUnit(digits) === unit, detectUnit(digits));
+    }
+
+    const SAME_INSTANT = ["1758086602", "1758086602000", "1758086602000000", "1758086602000000000"];
+    check(
+      "the same instant in all four units auto-detects to one time",
+      new Set(SAME_INSTANT.map((text) => parseMoment(text).ms)).size === 1,
+      JSON.stringify(SAME_INSTANT.map((t) => parseMoment(t).ms)),
+    );
+
+    // Forcing a unit must override the guess, not be ignored by it.
+    check("forcing milliseconds overrides the guess", parseMoment("1758086602", "milliseconds").ms === 1758086602);
+    check("forcing seconds overrides the guess", parseMoment("1758086602000", "seconds").ms === 1758086602000000);
+    check("auto is reported in the explanation", /10 digits/.test(parseMoment("1758086602").how), parseMoment("1758086602").how);
+    check("a forced unit explains without digit counting", !/digit/.test(parseMoment("1758086602", "seconds").how), parseMoment("1758086602", "seconds").how);
+  }
+
+  console.log("\n-- epoch: exactness --");
+  {
+    // The point of carrying nanoseconds as a bigint: 19 digits is past
+    // Number.MAX_SAFE_INTEGER, so a double round-trip would change the value.
+    const NANOS = "1699999999123456789";
+    const exact = parseMoment(NANOS);
+    check("a 19-digit nanosecond value survives unchanged", unitStrings(exact.nanos).nanoseconds === NANOS, unitStrings(exact.nanos).nanoseconds);
+    check(
+      "the same value through a double would have been wrong",
+      String(Number(NANOS)) !== NANOS,
+      `Number() gives ${Number(NANOS)}`,
+    );
+    check("its millisecond floor is right", exact.ms === 1699999999123, String(exact.ms));
+    check("its microseconds are exact", unitStrings(exact.nanos).microseconds === "1699999999123456");
+
+    const half = parseMoment("1699999999.5");
+    check("a fractional epoch is read as seconds", half.unit === "seconds" && half.ms === 1699999999500, `${half.unit} ${half.ms}`);
+    check("its nanoseconds are exact, not a float product", unitStrings(half.nanos).nanoseconds === "1699999999500000000", unitStrings(half.nanos).nanoseconds);
+
+    const fine = parseMoment("1699999999.1234567891", "seconds");
+    check("digits finer than a nanosecond are dropped and said so", /finer digits dropped/.test(fine.how), fine.how);
+
+    // Before 1970 every division has to floor, not truncate toward zero.
+    const NEGATIVE: readonly [string, number, string][] = [
+      ["-1", -1000, "-1"],
+      ["-0.5", -500, "-1"],
+      ["-1000", -1000000, "-1000"],
+    ];
+    for (const [text, ms, seconds] of NEGATIVE) {
+      const m = parseMoment(text);
+      check(`${text} floors correctly below the epoch`, m.ms === ms && unitStrings(m.nanos).seconds === seconds, `${m.ms} / ${unitStrings(m.nanos).seconds}`);
+    }
+    check("-1 is one second before the epoch", formatZoned(parseMoment("-1").ms, "UTC") === "1969-12-31 23:59:59 +00:00", formatZoned(parseMoment("-1").ms, "UTC"));
+  }
+
+  console.log("\n-- epoch: date strings --");
+  {
+    check("ISO 8601 with a Z", parseMoment("2026-09-17T14:03:22Z").ms === 1789653802000, String(parseMoment("2026-09-17T14:03:22Z").ms));
+    check("an explicit offset is honoured", parseMoment("2026-09-17T21:03:22+07:00").ms === 1789653802000, String(parseMoment("2026-09-17T21:03:22+07:00").ms));
+    check("a date string reports no unit", parseMoment("2026-09-17T14:03:22Z").unit === null);
+
+    // The ECMAScript spec's asymmetry, surfaced rather than hidden: a bare date
+    // is UTC, a bare date-time is local.
+    check("a bare date is midnight UTC", formatZoned(parseMoment("2026-09-17").ms, "UTC") === "2026-09-17 00:00:00 +00:00", formatZoned(parseMoment("2026-09-17").ms, "UTC"));
+    check("and says so", /midnight UTC/.test(parseMoment("2026-09-17").how), parseMoment("2026-09-17").how);
+    check("a zoneless date-time says it used the local zone", /local time zone/.test(parseMoment("2026-09-17T14:03:22").how), parseMoment("2026-09-17T14:03:22").how);
+    check("a zoned string says it carried its own offset", /its own offset/.test(parseMoment("2026-09-17T14:03:22Z").how), parseMoment("2026-09-17T14:03:22Z").how);
+
+    // `YYYY-MM-DD HH:MM:SS` is not in the spec; it is repaired to the T form so
+    // every browser reads it the same way rather than by private extension.
+    check("the SQL form parses", parseMoment("2026-09-17 14:03:22").ms === parseMoment("2026-09-17T14:03:22").ms);
+
+    const BAD = ["", "   ", "not a date", "2026-13-45T99:99:99Z", "0x10"];
+    let rejected = 0;
+    for (const bad of BAD) {
+      try { parseMoment(bad); } catch { rejected += 1; }
+    }
+    check("rejects what it cannot read", rejected === BAD.length, `${rejected}/${BAD.length}`);
+
+    // V8 reads "1.2.3" as 2 January 2003 and "09/17/2026" by American
+    // convention; other engines disagree. Guessing is worse than refusing, so
+    // a letterless string has to be ISO-shaped.
+    // `1.2` is deliberately absent: it is a valid fractional epoch, not a date.
+    const AMBIGUOUS = ["1.2.3", "09/17/2026", "17/09/2026", "10.0.0.1", "2026.09.17"];
+    let refused = 0;
+    let named = 0;
+    for (const text of AMBIGUOUS) {
+      try {
+        parseMoment(text);
+      } catch (error) {
+        refused += 1;
+        if (error instanceof Error && /too ambiguous/.test(error.message)) named += 1;
+      }
+    }
+    check("refuses dates only a legacy parser would accept", refused === AMBIGUOUS.length, `${refused}/${AMBIGUOUS.length}`);
+    check("and says why rather than just failing", named === AMBIGUOUS.length, `${named}/${AMBIGUOUS.length}`);
+
+    // A spelled-out month is not ambiguous, so those still parse.
+    check("a written month still works", parseMoment("17 Sep 2026 14:03:22 GMT").ms === Date.UTC(2026, 8, 17, 14, 3, 22), String(parseMoment("17 Sep 2026 14:03:22 GMT").ms));
+    check("the RFC 2822 form in a log still works", parseMoment("Thu, 17 Sep 2026 14:03:22 GMT").ms === Date.UTC(2026, 8, 17, 14, 3, 22));
+
+    let outOfRange = false;
+    try { parseMoment("99999999999999999999999999", "seconds"); } catch (error) {
+      outOfRange = error instanceof Error && /outside the range/.test(error.message);
+    }
+    check("refuses a value no date can hold, by name", outOfRange);
+  }
+
+  console.log("\n-- epoch: calendar --");
+  {
+    check("the epoch is day zero", daysFromCivil(1970, 1, 1) === 0, String(daysFromCivil(1970, 1, 1)));
+    check("day zero is the epoch", JSON.stringify(civilFromDays(0)) === '{"year":1970,"month":1,"day":1}', JSON.stringify(civilFromDays(0)));
+
+    // 400 years either side of the epoch, every day: the two functions must be
+    // exact inverses, which is what makes the rest of this section trustworthy.
+    let broken: string | null = null;
+    for (let days = -146097; days <= 146097 && broken === null; days += 1) {
+      const civil = civilFromDays(days);
+      if (daysFromCivil(civil.year, civil.month, civil.day) !== days) {
+        broken = `day ${days} became ${JSON.stringify(civil)}`;
+      }
+    }
+    check("civil-days round-trips for 800 years of dates", broken === null, broken ?? "");
+
+    const WEEKDAY_CASES: readonly [number, number, number, string][] = [
+      [1970, 1, 1, "Thursday"],
+      [1969, 12, 31, "Wednesday"],
+      [2000, 1, 1, "Saturday"],
+      [2024, 2, 29, "Thursday"],
+      [2026, 9, 17, "Thursday"],
+      [2038, 1, 19, "Tuesday"],
+    ];
+    for (const [year, month, day, name] of WEEKDAY_CASES) {
+      const actual = WEEKDAYS[weekdayIndex(year, month, day)];
+      check(`${year}-${month}-${day} was a ${name}`, actual === name, String(actual));
+    }
+
+    check("leap years", [2000, 2024, 1996].every(isLeapYear) && ![1900, 2023, 2100].some(isLeapYear));
+    check("day 366 exists in 2024", dayOfYear(2024, 12, 31) === 366, String(dayOfYear(2024, 12, 31)));
+    check("and not in 2023", dayOfYear(2023, 12, 31) === 365, String(dayOfYear(2023, 12, 31)));
+    check("1 March is day 61 in a leap year", dayOfYear(2024, 3, 1) === 61, String(dayOfYear(2024, 3, 1)));
+    check("and day 60 otherwise", dayOfYear(2023, 3, 1) === 60, String(dayOfYear(2023, 3, 1)));
+
+    // The cases that catch naive week numbering: a January day that belongs to
+    // the previous year, and a December day that belongs to the next one.
+    const WEEK_CASES: readonly [number, number, number, string][] = [
+      [2026, 9, 17, "2026-W38"],
+      [1970, 1, 1, "1970-W01"],
+      [2021, 1, 1, "2020-W53"],
+      [2020, 12, 31, "2020-W53"],
+      [2027, 1, 1, "2026-W53"],
+      [2019, 12, 30, "2020-W01"],
+      [2016, 1, 1, "2015-W53"],
+    ];
+    for (const [year, month, day, expected] of WEEK_CASES) {
+      const week = isoWeek(year, month, day);
+      const actual = `${week.year}-W${String(week.week).padStart(2, "0")}`;
+      check(`${year}-${month}-${day} is ${expected}`, actual === expected, actual);
+    }
+  }
+
+  console.log("\n-- epoch: rendering --");
+  {
+    // Published reference data: these nine rows are printed on the page, so a
+    // formatting regression would hand every visitor a wrong table.
+    const LANDMARKS: readonly [number, string][] = [
+      [-2208988800, "1900-01-01 00:00:00 +00:00"],
+      [-1, "1969-12-31 23:59:59 +00:00"],
+      [0, "1970-01-01 00:00:00 +00:00"],
+      [1000000000, "2001-09-09 01:46:40 +00:00"],
+      [1234567890, "2009-02-13 23:31:30 +00:00"],
+      [2000000000, "2033-05-18 03:33:20 +00:00"],
+      [2147483647, "2038-01-19 03:14:07 +00:00"],
+      [4294967295, "2106-02-07 06:28:15 +00:00"],
+      [253402300799, "9999-12-31 23:59:59 +00:00"],
+    ];
+    for (const [epoch, expected] of LANDMARKS) {
+      const actual = formatZoned(epoch * 1000, "UTC");
+      check(`${epoch} is ${expected}`, actual === expected, actual);
+    }
+
+    // A fixed-offset zone and a zone with daylight saving, at both ends of the
+    // year: rendering is where an offset gets dropped or applied backwards.
+    check("a +07:00 zone shifts forward", formatZoned(Date.UTC(2026, 0, 1), "Asia/Ho_Chi_Minh") === "2026-01-01 07:00:00 +07:00", formatZoned(Date.UTC(2026, 0, 1), "Asia/Ho_Chi_Minh"));
+    // Saigon ran on +08:00 until 1975, and the tz database knows it. Pinned
+    // because "apply the current offset to every date" is the shortcut that
+    // makes a converter wrong about anything historical.
+    check("a historical offset is not the current one", formatZoned(0, "Asia/Ho_Chi_Minh") === "1970-01-01 08:00:00 +08:00", formatZoned(0, "Asia/Ho_Chi_Minh"));
+    check("winter in New York is -05:00", formatZoned(Date.UTC(2026, 0, 15, 12), "America/New_York") === "2026-01-15 07:00:00 -05:00", formatZoned(Date.UTC(2026, 0, 15, 12), "America/New_York"));
+    check("summer in New York is -04:00", formatZoned(Date.UTC(2026, 6, 15, 12), "America/New_York") === "2026-07-15 08:00:00 -04:00", formatZoned(Date.UTC(2026, 6, 15, 12), "America/New_York"));
+    check("a half-hour offset survives", formatZoned(0, "Asia/Kolkata") === "1970-01-01 05:30:00 +05:30", formatZoned(0, "Asia/Kolkata"));
+
+    // Crossing a date line in the local zone is the case that makes "which day
+    // was that" a different answer per zone.
+    const newYear = Date.UTC(2026, 0, 1, 2);
+    const tokyo = zonedParts(newYear, "Asia/Tokyo");
+    const losAngeles = zonedParts(newYear, "America/Los_Angeles");
+    check("one instant is two different dates", tokyo.day === 1 && losAngeles.day === 31, `${tokyo.year}-${tokyo.month}-${tokyo.day} vs ${losAngeles.year}-${losAngeles.month}-${losAngeles.day}`);
+
+    check("the ISO rendering is the JavaScript one", new Date(parseMoment("1758086602").ms).toISOString() === "2025-09-17T05:23:22.000Z");
+
+    check("UTC is always offered", availableZones().includes("UTC"));
+    check("the local zone is always offered", availableZones().includes(localZone()), localZone());
+    check("the zone list is sorted and unique", (() => {
+      const zones = availableZones();
+      return zones.every((zone, i) => i === 0 || zones[i - 1]! < zone);
+    })());
+
+    const SPANS: readonly [number, string][] = [
+      [0, "0 seconds"],
+      [1, "1 second"],
+      [60, "1 minute"],
+      [3600, "1 hour"],
+      [86400, "1 day"],
+      [90061, "1 day 1 hour"],
+      [604800, "7 days"],
+      [31536000, "1 year"],
+      [63072000, "2 years"],
+    ];
+    for (const [seconds, expected] of SPANS) {
+      check(`${seconds} s is ${expected}`, formatSpan(seconds) === expected, formatSpan(seconds));
+    }
+
+    const now = Date.UTC(2026, 8, 17, 12);
+    check("relative: an hour ago", relativeToNow(now - 3600_000, now) === "1 hour ago", relativeToNow(now - 3600_000, now));
+    check("relative: in two days", relativeToNow(now + 2 * 86400_000, now) === "in 2 days", relativeToNow(now + 2 * 86400_000, now));
+    check("relative: the present is not a duration", relativeToNow(now, now) === "right now", relativeToNow(now, now));
+  }
+
   console.log("\n-- yaml --");
   {
     const tidy = await convertYaml("b:   1\na:\n  - 2\n", { mode: "format", indent: 2, sortKeys: false });

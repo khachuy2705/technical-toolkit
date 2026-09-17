@@ -1,11 +1,12 @@
 # Technical Toolkit
 
 A static site collecting small developer and security tools. Everything runs client-side —
-there is no backend, no database, and no network request after the page loads.
+there is no backend and no database. The only requests the site makes are for its own code from
+its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
 **hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**,
-**subnet calculator**.
+**subnet calculator**, **epoch converter**.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -63,6 +64,7 @@ src/
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
 │   ├── ipv4.ts          Address parsing and subnet arithmetic
+│   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
 │   ├── hash.ts          MD5 + SHA-256/512 over bytes

@@ -69,6 +69,7 @@ src/
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── ipv4.ts            Address parsing and subnet arithmetic
+│   ├── epoch.ts           Unix time parsing, civil-date maths, zone rendering
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -110,13 +111,14 @@ src/
 │       ├── hash-generator.astro
 │       ├── json-formatter.astro
 │       ├── yaml-formatter.astro
-│       └── subnet-calculator.astro
+│       ├── subnet-calculator.astro
+│       └── epoch-converter.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 1688 lines of logic in `lib/`, 582 of components and layouts, 1888 of pages, 1434 of
-CSS, 763 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 2125 lines of logic in `lib/`, 582 of components and layouts, 2447 of pages, 1525 of
+CSS, 1018 of verification. The wordlist modules are generated and excluded from that count.
 
 ---
 
@@ -351,7 +353,66 @@ pinned in the suite (the lib covers /0 even where the table does not), because a
 would publish a wrong reference table to every visitor. The table is the one element allowed to
 scroll sideways; the page body is not.
 
-### 6.8 Shared tool chrome
+### 6.8 Epoch converter — `/tools/epoch-converter/`
+
+One field that takes whatever a log line hands you: a bare epoch number in seconds, milliseconds,
+microseconds or nanoseconds, a fractional one like `1758086602.123`, ISO 8601, or the
+`2026-09-17 14:03:22` form a SQL console prints. Everything below it recomputes as you type.
+
+A ticking strip above the input shows the current time in seconds, milliseconds and ISO 8601, each
+with a copy button and a **Use this** button that drops it into the field — "what is the epoch
+right now" is half of why the page gets opened.
+
+Five values carry the accent: Unix seconds, Unix milliseconds, ISO 8601 UTC, your local time, and
+the same instant in whichever zone you pick. Then the supporting detail: relative to now, weekday,
+day of year, ISO week, microseconds, nanoseconds, and the UTC log form. Below that, two reference
+tables generated at build time from the same formatter the converter runs — landmark timestamps
+(the epoch itself, both 32-bit overflows, the database ceiling) and common intervals in seconds
+(DNS TTLs, session timeouts, certificate lifetimes).
+
+Four decisions carry the tool:
+
+- **Nanoseconds are a `bigint`, not a number.** A 19-digit nanosecond timestamp is past
+  `Number.MAX_SAFE_INTEGER`, so a converter that parses one into a double hands it back changed by
+  a couple of hundred nanoseconds. A check pins an exact round trip and asserts that the same
+  value through `Number()` really would have been wrong, so the reason for the `bigint` cannot be
+  optimised away by someone who does not know it. The decimal point is shifted by string
+  concatenation for the same reason: `1699999999.123456 * 1e9` is not an integer in binary
+  floating point.
+
+- **Calendar maths avoids `Date` entirely.** `daysFromCivil`/`civilFromDays` — Howard Hinnant's
+  pair — are pure, exact for every proleptic Gregorian year, and free of the two-digit-year trap
+  where `Date.UTC(99, 0, 1)` means 1999. They round-trip every day across 800 years in the suite.
+  Everything calendar-shaped is built on them: weekday, day of year, and the ISO week number,
+  which has to report its own week-numbering year because 1 January 2021 is week 53 of **2020**.
+
+- **The unit of a bare number is a guess, and it is labelled as one.** Ten digits is seconds,
+  thirteen milliseconds, sixteen microseconds, nineteen nanoseconds — those being where a
+  present-day timestamp sits in each unit — and the lengths in between round down to the coarser
+  one, because that is the reading that lands in a plausible year. The line above the input always
+  says which unit it chose and why, and five buttons override it.
+
+- **Ambiguous date strings are refused rather than guessed.** `Date.parse` is far more willing
+  than it looks: V8 reads `1.2.3` as 2 January 2003 and `09/17/2026` by American convention, and
+  other engines disagree. So a string with no letters in it has to carry the ISO calendar shape the
+  specification actually defines; a version string, a partial IP address or a slash-separated date
+  gets a named error instead of a silent reinterpretation. Strings with letters — `17 Sep 2026`,
+  the RFC 2822 form in an Apache log — still parse, because a spelled-out month is not ambiguous.
+  This is the same stance as the subnet calculator's refusal of leading zeros in §6.7.
+
+One asymmetry is surfaced rather than smoothed over, because it is a real JavaScript trap:
+`2026-09-17` alone is read as **midnight UTC**, while `2026-09-17T00:00:00` is read in your **local
+zone**. That is what the ECMAScript specification requires, so the page states which reading you
+got rather than pretending the two are the same.
+
+Time zones come from `Intl.supportedValuesOf("timeZone")` at runtime, not baked at build time — it
+is the visitor's browser that has to be able to format them, and a fallback list covers the
+runtimes that will not answer. Historical offsets are honoured because the zone database carries
+them: a check pins `1970-01-01` in `Asia/Ho_Chi_Minh` at **+08:00**, which is what Saigon ran on
+before 1975, precisely because "apply the current offset to every date" is the shortcut that makes
+a converter wrong about anything historical.
+
+### 6.9 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
 `IoPanel` and `lib/textio.ts`:
@@ -382,7 +443,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.9 Site-wide
+### 6.10 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
@@ -498,7 +559,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 199 checks, Node, no browser
+npm run verify   # 291 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -550,12 +611,24 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
   loaded, so the bits-per-word note can never describe the wrong list.
 - **Entropy arithmetic** — exact bit values for known configurations, tier boundaries, and
   crack-time formatting at both extremes.
+- **Epoch exactness** — a 19-digit nanosecond value round-trips unchanged, and the check also
+  asserts that the same value through `Number()` would have been wrong, so the reason for the
+  `bigint` stays on record. Fractional and negative epochs are pinned too, because every division
+  below 1970 has to floor rather than truncate toward zero.
+- **Civil-date arithmetic** — `daysFromCivil` and `civilFromDays` are asserted to be exact
+  inverses for every day across 800 years, which is what the weekday, day-of-year and ISO week
+  results rest on. Week numbering is pinned at the cases that catch naive implementations:
+  2021-01-01 is 2020-W53, 2019-12-30 is 2020-W01.
+- **Date-string policy** — that `1.2.3`, `09/17/2026` and `10.0.0.1` are refused *by name*, while
+  `Thu, 17 Sep 2026 14:03:22 GMT` still parses.
+- **Zone rendering** — a fixed offset, a half-hour offset, both sides of a daylight-saving
+  transition in `America/New_York`, one instant falling on two different dates in Tokyo and Los
+  Angeles, and a historical offset the current one would get wrong.
+- **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
+  in full, because both tables are rendered at build time and a regression would hand every
+  visitor a wrong reference.
 
 Run it after touching anything in `src/lib/`.
-
-The build output is also checked statically: every DOM hook the page scripts query is asserted to
-exist in the built HTML, and the HTML is scanned for third-party origins — the mechanical version
-of the privacy claim in §1.
 
 ---
 
@@ -568,7 +641,7 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 17.2 KB (4.0 KB) | every page |
+| CSS | 20.9 KB (4.6 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
 | Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
@@ -578,6 +651,7 @@ Bundle sizes as built (gzip in brackets):
 | Hash page script | 3.3 KB (1.6 KB) | hash page |
 | JSON page script | 2.1 KB (1.1 KB) | JSON page |
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
+| Epoch page script | 8.0 KB (3.6 KB) | epoch page |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
@@ -602,9 +676,14 @@ Honest list, in rough order of how much they matter:
    the default word count to 7 would clear 80 bits; a `recommendedWords` field per wordlist would
    let the word count follow the pool automatically, which is the better fix now that the pool
    varies with what the user ticks.
-2. **No browser-level test.** Verification covers logic in Node and DOM hooks in the built HTML,
-   but nothing has ever driven the actual page. A smoke test with Playwright — load each tool,
-   click regenerate, assert the output changed — would close the gap.
+2. **No browser-level test, and no audit of the built HTML.** Verification covers `lib/` in Node
+   and nothing else. Nothing has ever driven the actual page, and nothing checks that the DOM
+   hooks each page script queries are present in the built output — `el()` throws on a missing
+   selector, so a renamed `id` would break a tool silently until someone opened it. Two separate
+   fixes: a static pass over `dist/` asserting every queried hook exists and no third-party origin
+   is loaded (cheap, and it would mechanise the privacy claim in §1), and a Playwright smoke test
+   (the real fix). *An earlier revision of this document claimed the static pass already existed.
+   It does not, and never did.*
 3. **`entropy.ts` imports from `passphrase.ts`** for the symbol alphabets, which pulls passphrase
    code into the password page's shared chunk. Small, but a real coupling; moving the symbol
    constants into their own module would break it.
@@ -626,5 +705,11 @@ Honest list, in rough order of how much they matter:
    test before it was understood.
 10. **The subnet calculator is IPv4 only.** Subnet masks, broadcast addresses and the /31 rule
     are IPv4 concepts; IPv6 needs a different presentation rather than a wider parser.
-11. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
+11. **The epoch converter leans on the browser for two things.** Zone rendering comes from
+    `Intl`, so the answer is only as current as the visitor's tz database — a device that has not
+    been updated since a country last moved its clocks will render recent dates in that zone
+    wrongly, and the page has no way to know. Separately, date strings containing letters still go
+    through `Date.parse`, which is implementation-defined beyond ISO 8601; the letterless cases are
+    refused outright (§6.8) but `"Sept 17 2026"` may parse in one engine and not another.
+12. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
     behind them.

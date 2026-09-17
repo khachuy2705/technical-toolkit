@@ -63,6 +63,22 @@ export const TOOLS: readonly Tool[] = [
     status: 'live',
   },
   {
+    slug: 'epoch-converter',
+    name: 'Epoch Converter',
+    tagline: 'Unix time in, every calendar reading out.',
+    description:
+      'Convert Unix timestamps to dates and back, in seconds, milliseconds, microseconds or nanoseconds. Read any log line in UTC, your own zone or any other, with the ISO week and day of year alongside.',
+    keywords: [
+      'epoch converter',
+      'unix timestamp',
+      'unix time converter',
+      'epoch to date',
+      'timestamp to date',
+    ],
+    icon: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    status: 'live',
+  },
+  {
     slug: 'uuid-generator',
     name: 'UUID Generator',
     tagline: 'v4 and v7 identifiers, in bulk.',

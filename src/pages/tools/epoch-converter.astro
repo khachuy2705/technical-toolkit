@@ -1,0 +1,559 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { formatSpan, formatZoned } from "../../lib/epoch";
+
+/**
+ * The five an operator reads off a log line come first and carry the accent;
+ * the rest is the supporting detail.
+ */
+const FACTS = [
+  { id: "unix-seconds", label: "Unix time (seconds)", primary: true },
+  { id: "unix-millis", label: "Unix time (milliseconds)", primary: true },
+  { id: "iso", label: "ISO 8601 (UTC)", primary: true },
+  { id: "local", label: "Your local time", primary: true },
+  { id: "zoned", label: "Selected time zone", primary: true },
+  { id: "relative", label: "Relative to now", primary: false },
+  { id: "weekday", label: "Day of the week", primary: false },
+  { id: "day-of-year", label: "Day of year", primary: false },
+  { id: "iso-week", label: "ISO week", primary: false },
+  { id: "unix-micros", label: "Unix time (microseconds)", primary: false },
+  { id: "unix-nanos", label: "Unix time (nanoseconds)", primary: false },
+  { id: "utc-log", label: "UTC, log format", primary: false },
+] as const;
+
+const UNITS = [
+  { value: "auto", label: "Auto" },
+  { value: "seconds", label: "Seconds" },
+  { value: "milliseconds", label: "Millis" },
+  { value: "microseconds", label: "Micros" },
+  { value: "nanoseconds", label: "Nanos" },
+] as const;
+
+const PRESETS = ["0", "1000000000", "2147483647", "1758086602123", "2026-09-17T14:03:22Z"];
+
+/**
+ * Rendered at build time from the same `formatZoned` the calculator uses, so a
+ * change to the formatting cannot leave the reference table behind.
+ */
+const LANDMARKS: readonly { epoch: number; note: string }[] = [
+  { epoch: -2208988800, note: "The other epoch — NTP, and Excel's 1900 lineage, start near here" },
+  { epoch: -1, note: "One second before the epoch. Negative Unix time is legal and common" },
+  { epoch: 0, note: "The Unix epoch itself" },
+  { epoch: 1000000000, note: "The first billion" },
+  { epoch: 1234567890, note: "1234567890 — the one sysadmins stayed up for" },
+  { epoch: 2000000000, note: "The second billion" },
+  { epoch: 2147483647, note: "Signed 32-bit overflow. The Year 2038 problem" },
+  { epoch: 4294967295, note: "Unsigned 32-bit overflow" },
+  { epoch: 253402300799, note: "9999-12-31T23:59:59Z — the ceiling in many databases" },
+];
+
+/** DNS TTLs, session timeouts, cert lifetimes: the numbers that get typed into config. */
+const INTERVALS = [
+  60, 300, 600, 900, 1800, 3600, 10800, 21600, 43200, 86400, 172800, 604800, 2592000, 7776000,
+  31536000, 63072000,
+];
+---
+
+<ToolLayout slug="epoch-converter">
+  <section class="card now">
+    <div class="now__head">
+      <span class="now__label">Right now</span>
+      <span class="now__zone" id="now-zone"></span>
+      <button type="button" class="btn btn--tiny" id="now-use">Use this</button>
+    </div>
+    <div class="now__row">
+      {
+        [
+          { id: "seconds", unit: "seconds" },
+          { id: "millis", unit: "milliseconds" },
+          { id: "iso", unit: "ISO 8601 UTC" },
+        ].map((item) => (
+          <div class="now__item">
+            <span class="now__unit">{item.unit}</span>
+            <span class="now__value" data-now={item.id}>&mdash;</span>
+            <button
+              type="button"
+              class="now__copy"
+              data-copy-now={item.id}
+              aria-label={`Copy the current time in ${item.unit}`}
+              title="Copy"
+            >
+              <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+            </button>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="stamp">Timestamp or date</label>
+      <span class="io__meta" id="input-meta"></span>
+    </div>
+
+    <input
+      type="text"
+      id="stamp"
+      class="big-input"
+      value="1758086602"
+      placeholder="1758086602, or 2026-09-17T14:03:22Z"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      inputmode="text"
+    />
+
+    <p class="field__hint" style="margin-top:0.5rem">
+      Takes a bare epoch number in any of the four units, a fractional one like
+      <code>1758086602.123</code>, ISO 8601, or the <code>2026-09-17 14:03:22</code> form a SQL
+      console prints.
+    </p>
+
+    <div class="controls" style="margin-top:1rem">
+      <div class="field">
+        <span class="field__label">Read the number as</span>
+        <div class="segmented" role="radiogroup" aria-label="Unit of the input number">
+          {
+            UNITS.map((unit) => (
+              <label>
+                <input type="radio" name="unit" value={unit.value} checked={unit.value === "auto"} />
+                <span>{unit.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="field__hint">Auto guesses from the digit count. Ignored for date strings.</p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="zone">Time zone</label>
+        <select id="zone"></select>
+        <p class="field__hint" id="zone-hint">Loaded from your browser&rsquo;s own zone database.</p>
+      </div>
+    </div>
+
+    <div class="preset-row">
+      <button type="button" class="btn btn--tiny" id="preset-now">Now</button>
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+    </div>
+  </section>
+
+  <p class="output__error" id="stamp-error" role="alert" hidden></p>
+
+  <ul class="facts" id="facts">
+    {
+      FACTS.map((fact) => (
+        <li class:list={["fact", fact.primary && "fact--primary"]}>
+          <div class="fact__head">
+            <span class="fact__label" data-title={fact.id}>
+              {fact.label}
+            </span>
+            <button
+              type="button"
+              class="btn btn--tiny"
+              data-copy={fact.id}
+              aria-label={`Copy the ${fact.label.toLowerCase()}`}
+            >
+              <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              <span data-label>Copy</span>
+            </button>
+          </div>
+          <span class="fact__value" data-value={fact.id} data-empty="true">
+            &mdash;
+          </span>
+          <span class="fact__note" data-note={fact.id} />
+        </li>
+      ))
+    }
+  </ul>
+
+  <section class="card">
+    <h2 class="card__title">Landmark timestamps</h2>
+
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Well-known Unix timestamps with the UTC date each one falls on. Every epoch number has a
+          button that copies it.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Epoch (seconds)</th>
+            <th scope="col">UTC</th>
+            <th scope="col">What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            LANDMARKS.map((row) => (
+              <tr data-common={row.epoch === 2147483647 ? "" : undefined}>
+                <th scope="row" class="sheet__key">
+                  <span class="sheet__mask">
+                    {row.epoch}
+                    <button
+                      type="button"
+                      class="sheet__copy"
+                      data-copy-mask={String(row.epoch)}
+                      title={`Copy ${row.epoch}`}
+                      aria-label={`Copy the epoch value ${row.epoch}`}
+                    >
+                      <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+                    </button>
+                  </span>
+                </th>
+                <td>{formatZoned(row.epoch * 1000, "UTC")}</td>
+                <td class="sheet__prose">{row.note}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Generated from the same formatter the converter above uses. The highlighted row is
+      <code>2147483647</code>, where a signed 32-bit <code>time_t</code> runs out.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Common intervals in seconds</h2>
+
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Durations expressed in seconds, the form a TTL or timeout is configured in.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col" class="sheet__num">Seconds</th>
+            <th scope="col">Is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            INTERVALS.map((seconds) => (
+              <tr data-common={seconds === 86400 || seconds === 3600 || seconds === 604800 ? "" : undefined}>
+                <th scope="row" class="sheet__num">
+                  <span class="sheet__mask">
+                    {seconds.toLocaleString("en-US")}
+                    <button
+                      type="button"
+                      class="sheet__copy"
+                      data-copy-mask={String(seconds)}
+                      title={`Copy ${seconds}`}
+                      aria-label={`Copy ${seconds}`}
+                    >
+                      <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+                    </button>
+                  </span>
+                </th>
+                <td>{formatSpan(seconds)}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose">
+    <h2>Ten digits or thirteen</h2>
+    <p>
+      A bare number carries no unit, so this page guesses from how many digits it has: ten is
+      seconds, thirteen is milliseconds, sixteen is microseconds, nineteen is nanoseconds. Those are
+      simply where a present-day timestamp sits in each unit, and the in-between lengths round down
+      to the coarser one because that is the reading that lands in a plausible year.
+    </p>
+    <p>
+      It is still a guess. The classic production bug is a millisecond value handed to something
+      expecting seconds, which quietly becomes a date in the year 57000 — or the reverse, which
+      becomes January 1970. If the guess is wrong, say so with the unit buttons and the whole page
+      re-reads the number.
+    </p>
+
+    <h2>Unix time has no leap seconds</h2>
+    <p>
+      Every Unix day is exactly 86,400 seconds by definition, so the counter simply does not
+      represent the leap seconds UTC inserts. A POSIX clock repeats or skips a value instead. The
+      practical consequence: subtracting two Unix timestamps gives you the elapsed calendar time,
+      not the elapsed physical time, and across the 27 leap seconds since 1972 those differ. For
+      anything that needs real elapsed duration, a monotonic clock is the right tool, not this one.
+    </p>
+
+    <h2>The year 2038</h2>
+    <p>
+      A signed 32-bit <code>time_t</code> runs out at <code>2147483647</code> &mdash;
+      2038-01-19 03:14:07 UTC &mdash; and wraps to 1901. It is not only ancient hardware: embedded
+      devices, older filesystem formats and 32-bit builds of otherwise current software still carry
+      it. The number is in the landmark table above so you can paste it into whatever you are
+      testing.
+    </p>
+
+    <h2>Local time is a rendering, not a value</h2>
+    <p>
+      The epoch number itself is an instant with no zone attached. Everything below the fold here
+      &mdash; your local time, the selected zone, the weekday &mdash; is that one instant rendered
+      through a zone&rsquo;s rules, including whatever daylight-saving transition was in force on
+      that date. Two people reading the same timestamp correctly will see different wall clocks.
+    </p>
+    <p>
+      One asymmetry in the input is worth knowing because it is a genuine JavaScript trap:
+      <code>2026-09-17</code> on its own is read as <b>midnight UTC</b>, while
+      <code>2026-09-17T00:00:00</code> is read in <b>your local zone</b>. That is what the
+      ECMAScript specification requires, not a choice this page made, so the line above the input
+      always says which reading you got.
+    </p>
+
+    <h2>Nanoseconds survive the round trip</h2>
+    <p>
+      A nineteen-digit nanosecond timestamp is larger than the biggest integer a JavaScript number
+      can hold exactly, so a tool that parses one into a <code>Number</code> hands it back changed
+      by a couple of hundred nanoseconds. Here the value is carried as an arbitrary-precision
+      integer, and the microsecond and nanosecond rows are exact &mdash; paste one in and it comes
+      back digit for digit.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    WEEKDAYS,
+    availableZones,
+    dayOfYear,
+    formatZoned,
+    isLeapYear,
+    isoWeek,
+    localZone,
+    parseMoment,
+    relativeToNow,
+    unitStrings,
+    weekdayIndex,
+    zonedParts,
+    type UnitChoice,
+  } from "../../lib/epoch";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-epoch";
+
+  const input = el<HTMLInputElement>("#stamp");
+  const errorBox = el<HTMLParagraphElement>("#stamp-error");
+  const inputMeta = el<HTMLElement>("#input-meta");
+  const unitRadios = all<HTMLInputElement>('input[name="unit"]');
+  const zoneSelect = el<HTMLSelectElement>("#zone");
+  const zoneHint = el<HTMLElement>("#zone-hint");
+
+  const values = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-value]").map((node) => [node.dataset["value"]!, node]),
+  );
+  const notes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-note]").map((node) => [node.dataset["note"]!, node]),
+  );
+  const titles = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-title]").map((node) => [node.dataset["title"]!, node]),
+  );
+
+  /** Plain strings for the copy buttons, which must not copy an em dash. */
+  let current = new Map<string, string>();
+
+  /**
+   * The last instant that parsed, so the clock can keep the "relative to now"
+   * card honest as time passes. Null whenever there is nothing on screen —
+   * otherwise a cleared input would be quietly repopulated on the next tick.
+   */
+  let lastMs: number | null = null;
+
+  /* -------------------------------------------------------------- time zones */
+
+  const HOME = localZone();
+  const zones = availableZones();
+  const fragment = document.createDocumentFragment();
+  for (const zone of zones) {
+    const option = document.createElement("option");
+    option.value = zone;
+    option.textContent = zone;
+    fragment.append(option);
+  }
+  zoneSelect.append(fragment);
+  zoneSelect.value = HOME;
+  zoneHint.textContent = `${zones.length} zones from your browser. Yours is ${HOME}.`;
+
+  /* ------------------------------------------------------------------ state */
+
+  const prefs = loadPrefs(PREFS_KEY, { text: "", unit: "auto", zone: HOME });
+  if (typeof prefs.text === "string" && prefs.text.length > 0) input.value = prefs.text;
+  for (const radio of unitRadios) radio.checked = radio.value === prefs.unit;
+  if (!unitRadios.some((radio) => radio.checked)) unitRadios[0]!.checked = true;
+  // A saved zone the browser no longer knows would format as garbage.
+  if (typeof prefs.zone === "string" && zones.includes(prefs.zone)) zoneSelect.value = prefs.zone;
+
+  const unitChoice = (): UnitChoice =>
+    (unitRadios.find((radio) => radio.checked)?.value as UnitChoice | undefined) ?? "auto";
+
+  function set(id: string, value: string, note = ""): void {
+    current.set(id, value);
+    const node = values.get(id);
+    if (node) {
+      node.textContent = value;
+      delete node.dataset["empty"];
+    }
+    const noteNode = notes.get(id);
+    if (noteNode) noteNode.textContent = note;
+  }
+
+  function clear(): void {
+    current = new Map();
+    lastMs = null;
+    for (const node of values.values()) {
+      node.textContent = "—";
+      node.dataset["empty"] = "true";
+    }
+    for (const node of notes.values()) node.textContent = "";
+  }
+
+  /* ------------------------------------------------------------------- render */
+
+  function run(): void {
+    const zone = zoneSelect.value;
+    savePrefs(PREFS_KEY, { text: input.value, unit: unitChoice(), zone });
+
+    const zoneTitle = titles.get("zoned");
+    if (zoneTitle) zoneTitle.textContent = zone === HOME ? `${zone} (yours)` : zone;
+
+    if (input.value.trim().length === 0) {
+      errorBox.hidden = true;
+      inputMeta.textContent = "";
+      clear();
+      return;
+    }
+
+    let moment: ReturnType<typeof parseMoment>;
+    try {
+      moment = parseMoment(input.value, unitChoice());
+    } catch (error) {
+      errorBox.textContent = error instanceof Error ? error.message : String(error);
+      errorBox.hidden = false;
+      inputMeta.textContent = "";
+      clear();
+      return;
+    }
+
+    errorBox.hidden = true;
+    inputMeta.textContent = moment.how;
+
+    const units = unitStrings(moment.nanos);
+    set("unix-seconds", units.seconds, "what most APIs and log lines mean");
+    set("unix-millis", units.milliseconds, "JavaScript, Java and most JSON APIs");
+    set("unix-micros", units.microseconds, "exact — no floating-point rounding");
+    set("unix-nanos", units.nanoseconds, "exact — Go, eBPF, tracing output");
+
+    set("iso", new Date(moment.ms).toISOString(), "RFC 3339, always UTC");
+
+    set("local", formatZoned(moment.ms, HOME), HOME);
+    set("zoned", formatZoned(moment.ms, zone), zone === HOME ? "same as your local time" : zone);
+
+    const utc = zonedParts(moment.ms, "UTC");
+    set(
+      "utc-log",
+      formatZoned(moment.ms, "UTC").replace(" +00:00", ""),
+      "the form syslog and SQL want",
+    );
+
+    // The calendar facts describe the date as the selected zone sees it, which
+    // is the only reading that answers "which day was that for me".
+    const local = zonedParts(moment.ms, zone);
+    set(
+      "weekday",
+      WEEKDAYS[weekdayIndex(local.year, local.month, local.day)]!,
+      `in ${zone}; UTC has it as ${WEEKDAYS[weekdayIndex(utc.year, utc.month, utc.day)]!}`,
+    );
+
+    const doy = dayOfYear(local.year, local.month, local.day);
+    const yearLength = isLeapYear(local.year) ? 366 : 365;
+    set("day-of-year", `${doy} of ${yearLength}`, isLeapYear(local.year) ? "leap year" : "common year");
+
+    const week = isoWeek(local.year, local.month, local.day);
+    set(
+      "iso-week",
+      `${week.year}-W${String(week.week).padStart(2, "0")}`,
+      week.year === local.year ? "ISO 8601 week numbering" : `week-numbering year differs from ${local.year}`,
+    );
+
+    renderRelative(moment.ms);
+  }
+
+  /** Split out because it is also refreshed on every tick of the clock. */
+  function renderRelative(ms: number): void {
+    lastMs = ms;
+    set("relative", relativeToNow(ms, Date.now()), "compared with your device clock");
+  }
+
+  /* ---------------------------------------------------------------- live clock */
+
+  const nowNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-now]").map((node) => [node.dataset["now"]!, node]),
+  );
+  const nowValues = new Map<string, string>();
+
+  el<HTMLElement>("#now-zone").textContent = HOME;
+
+  function tick(): void {
+    const ms = Date.now();
+    nowValues.set("seconds", String(Math.floor(ms / 1000)));
+    nowValues.set("millis", String(ms));
+    nowValues.set("iso", new Date(ms).toISOString());
+    for (const [id, node] of nowNodes) node.textContent = nowValues.get(id) ?? "—";
+    if (lastMs !== null) renderRelative(lastMs);
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  input.addEventListener("input", run);
+  zoneSelect.addEventListener("change", run);
+  for (const radio of unitRadios) radio.addEventListener("change", run);
+
+  el<HTMLButtonElement>("#preset-now").addEventListener("click", () => {
+    input.value = String(Math.floor(Date.now() / 1000));
+    input.focus();
+    run();
+  });
+
+  el<HTMLButtonElement>("#now-use").addEventListener("click", () => {
+    input.value = nowValues.get("seconds") ?? String(Math.floor(Date.now() / 1000));
+    run();
+  });
+
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      input.value = button.dataset["preset"]!;
+      // The presets are written in mixed units on purpose, so a forced unit
+      // left over from the last input would read half of them as an error.
+      unitRadios[0]!.checked = true;
+      input.focus();
+      run();
+    });
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-copy]")) {
+    const id = button.dataset["copy"]!;
+    attachCopy(button, () => current.get(id) ?? "");
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-copy-now]")) {
+    const id = button.dataset["copyNow"]!;
+    attachCopy(button, () => nowValues.get(id) ?? "");
+  }
+
+  // Reference-table rows carry their own value, so there is nothing to look up.
+  for (const button of all<HTMLButtonElement>("[data-copy-mask]")) {
+    attachCopy(button, () => button.dataset["copyMask"] ?? "");
+  }
+
+  tick();
+  window.setInterval(tick, 1000);
+  run();
+</script>

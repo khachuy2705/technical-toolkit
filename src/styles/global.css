@@ -1147,9 +1147,19 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.sheet__cidr {
+/* The row key: the CIDR prefix on the subnet sheet, the epoch number on the
+   timestamp sheet. */
+.sheet__key {
   font-weight: 650;
   color: var(--accent);
+}
+
+/* Sentence cells opt out of the nowrap the numeric columns need. */
+.sheet__prose {
+  white-space: normal;
+  min-width: 16rem;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
 }
 
 /* /8, /16 and /24 are the ones people actually come to look up. */
@@ -1159,6 +1169,87 @@ select {
 
 .sheet tr[data-common] {
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* --------------------------------------------------------------------------- Live clock strip */
+
+/* A ticking value is the first thing an epoch tool is opened for, so it sits
+   above the input rather than among the results. Deliberately quiet: it must
+   not compete with the accent cards below it. */
+.now {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.now__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.now__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.now__zone {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.now__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.6rem;
+}
+
+.now__item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.now__unit {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+/* Tabular figures keep the seconds column from twitching once a second. */
+.now__value {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  user-select: all;
+  overflow-wrap: anywhere;
+}
+
+.now__copy {
+  display: inline-flex;
+  align-self: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  line-height: 0;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.now__copy:hover {
+  background: var(--surface-raised);
+  color: var(--accent);
+}
+
+.now__copy[data-copied="true"] {
+  color: var(--strength-4);
 }
 
 /* --------------------------------------------------------------------------- Hash rows */

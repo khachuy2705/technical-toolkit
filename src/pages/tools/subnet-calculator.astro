@@ -139,7 +139,7 @@ const CHEAT_SHEET = Array.from({ length: 32 }, (_, index) => {
           {
             CHEAT_SHEET.map((row) => (
               <tr data-common={row.common ? "" : undefined}>
-                <th scope="row" class="sheet__cidr">/{row.prefix}</th>
+                <th scope="row" class="sheet__key">/{row.prefix}</th>
                 <td>
                   <span class="sheet__mask">
                     {row.mask}
