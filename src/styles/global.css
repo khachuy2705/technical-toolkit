@@ -31,6 +31,15 @@
   --strength-3: #0e7490;
   --strength-4: #047857;
 
+  /* Syntax colours. Each clears 4.5:1 on both --surface and --bg-subtle. */
+  --syn-key: #1d4ed8;
+  --syn-string: #047857;
+  --syn-number: #92400e;
+  --syn-literal: #7c3aed;
+  --syn-punct: #5f6461;
+  --syn-error-bg: #fecaca;
+  --syn-error-line: #b91c1c;
+
   --radius: 10px;
   --radius-sm: 7px;
   --radius-lg: 16px;
@@ -68,6 +77,14 @@
     --strength-2: #fbbf24;
     --strength-3: #38bdf8;
     --strength-4: #34d399;
+
+    --syn-key: #93c5fd;
+    --syn-string: #6ee7b7;
+    --syn-number: #fcd34d;
+    --syn-literal: #c4b5fd;
+    --syn-punct: #8e9794;
+    --syn-error-bg: #7f1d1d;
+    --syn-error-line: #f87171;
   }
 }
 
@@ -94,6 +111,14 @@
   --strength-2: #fbbf24;
   --strength-3: #38bdf8;
   --strength-4: #34d399;
+
+  --syn-key: #93c5fd;
+  --syn-string: #6ee7b7;
+  --syn-number: #fcd34d;
+  --syn-literal: #c4b5fd;
+  --syn-punct: #8e9794;
+  --syn-error-bg: #7f1d1d;
+  --syn-error-line: #f87171;
 }
 
 /* --------------------------------------------------------------------------- Base */
@@ -965,6 +990,100 @@ select {
 
 .btn--tiny[hidden] {
   display: none;
+}
+
+/* --------------------------------------------------------------------------- Syntax layer */
+
+/* The textarea sits on top with transparent text; the <pre> underneath carries
+   the same characters in colour. Both share .io__text, so font, padding, border
+   and wrapping are identical by construction — the one thing that must never
+   differ, or the caret drifts away from the text it edits. */
+.code {
+  position: relative;
+}
+
+.code__layer {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  min-height: 0;
+  overflow: hidden;
+  resize: none;
+  pointer-events: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* A <pre> is never editable, so `.io__text:read-only` matches the input's layer
+   too. These two rules restate the backgrounds at a specificity that wins. */
+.code > .code__layer {
+  background: var(--surface);
+}
+
+.code > .code__layer--readonly {
+  background: var(--bg-subtle);
+}
+
+/* A scrollbar that appears in one layer and not the other would narrow only
+   one of them and re-wrap every line. Reserving the gutter in both keeps the
+   text width equal whether or not anything scrolls. */
+.code > .io__text {
+  scrollbar-gutter: stable;
+}
+
+.code > textarea.io__text {
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.code > textarea.io__text::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Past the size limit the layer is emptied and the textarea shows its own text. */
+.code[data-plain] > textarea.io__text {
+  color: var(--text);
+}
+
+.code[data-plain] > .code__layer {
+  visibility: hidden;
+}
+
+.tok-key {
+  color: var(--syn-key);
+}
+
+.tok-string {
+  color: var(--syn-string);
+}
+
+.tok-number {
+  color: var(--syn-number);
+}
+
+.tok-boolean,
+.tok-null {
+  color: var(--syn-literal);
+}
+
+.tok-punct {
+  color: var(--syn-punct);
+}
+
+.tok-invalid {
+  color: var(--syn-error-line);
+}
+
+/* The exact character the parser stopped at — the same place the error
+   message names by line and column. */
+.tok-error {
+  border-radius: 2px;
+  background: var(--syn-error-bg);
+  color: inherit;
+  box-shadow: inset 0 -2px 0 var(--syn-error-line);
 }
 
 /* --------------------------------------------------------------------------- Fact grid */

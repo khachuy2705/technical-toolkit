@@ -77,6 +77,7 @@ src/
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
 │   ├── format.ts          Shared result type, line/column, deep key sort
 │   ├── jsonfmt.ts         Format/minify/sort + engine-independent locator
+│   ├── jsonhighlight.ts   Forgiving JSON scanner → highlighted HTML
 │   ├── yamlfmt.ts         Tidy YAML, convert to/from JSON (lazy js-yaml)
 │   ├── clipboard.ts       Copy, with a non-secure-context fallback
 │   ├── ui.ts              DOM helpers. See §4.
@@ -310,6 +311,26 @@ page; there is no message catalogue, because no page exists in two languages. Th
 - Sorting is recursive over objects. **Array order is never touched**: in JSON an array's order is
   data, so reordering it would change the document rather than reformat it.
 - Minify reports how many characters it saved.
+- **Syntax colouring in both panes, as you type.** Keys, strings, numbers, `true`/`false`/`null`
+  and punctuation each have a colour; anything JSON does not allow — a comment, a bare word, a
+  quote that never closes — is red before the formatter even runs. After a failed parse, the
+  exact character the error message names is marked in the input.
+
+  It is a layer, not an editor. `lib/jsonhighlight.ts` is a forgiving scanner (never throws; every
+  character lands in exactly one token) that returns an HTML string. `IoPanel highlight` puts a
+  `<pre>` behind each textarea; the textarea's text is transparent and its caret is not, so typing,
+  selection, copy, undo and resizing are all the browser's own. The layer carries the same
+  `.io__text` class, so font, padding, border and wrapping match by construction, and both reserve
+  the scrollbar gutter so a scrollbar appearing in one cannot re-wrap only that one. Scrolling is
+  mirrored on the textarea's `scroll` event.
+
+  The input layer repaints on every keystroke rather than after the debounce — its text is
+  invisible otherwise — so documents over 200,000 characters (about 25 ms to colour) fall back to
+  plain text. The suite fuzzes the one invariant that matters: with the tags stripped, the layer's
+  text is exactly the textarea's, over 3,000 generated inputs. A browser run over the DevTools
+  protocol confirmed the two layers overlap glyph for glyph, including wrapped lines, accented text
+  and emoji, and after scrolling. Base64 and YAML use the same panel without the layer and are
+  unchanged.
 
 ### 6.6 YAML formatter — `/tools/yaml-formatter/`
 
@@ -651,7 +672,7 @@ attributes.
 ## 9. Verification
 
 ```bash
-npm run verify   # 380 checks, Node, no browser
+npm run verify   # 396 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -722,6 +743,9 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **Lunar calendar** — Tết dates, leap months and Can Chi against public record, the Hanoi/Beijing
   splits of 1968 and 1985, the 1967/1968 era join, every refusal by name, and a solar→lunar→solar
   round trip over every day from 1900 to 2199 (about 0.4 s).
+- **JSON highlighting** — tokens tile every input with no gap or overlap and the layer's text
+  equals the textarea's (fuzzed over 3,000 inputs), key/string classification, markup escaping,
+  and where the error mark lands.
 - **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
   in full, because both tables are rendered at build time and a regression would hand every
   visitor a wrong reference.
@@ -739,7 +763,7 @@ Bundle sizes as built (gzip in brackets):
 
 | Asset | Size | Loaded by |
 |---|---|---|
-| CSS | 22.5 KB (4.8 KB) | every page |
+| CSS | 23.9 KB (5.2 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
 | Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
@@ -747,7 +771,7 @@ Bundle sizes as built (gzip in brackets):
 | Passphrase page script | 3.0 KB (1.4 KB) | passphrase page |
 | Base64 page script | 1.7 KB (1.0 KB) | Base64 page |
 | Hash page script | 3.3 KB (1.6 KB) | hash page |
-| JSON page script | 2.1 KB (1.1 KB) | JSON page |
+| JSON page script | 3.7 KB (1.9 KB) | JSON page, highlighting included |
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
 | Epoch page script | 11.6 KB (4.8 KB) | epoch page |
 | Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
@@ -788,9 +812,10 @@ Honest list, in rough order of how much they matter:
    constants into their own module would break it.
 4. **No `modulepreload` for the shared chunk**, so it is a second round trip after the page
    script. Irrelevant at 3.8 KB, worth revisiting if it grows.
-5. **The text panes have no syntax highlighting or line numbers.** For formatters whose error
-   messages name a line, a plain textarea makes the reader count. An editor component would be the
-   single heaviest asset on the site, so this stays a deliberate trade rather than an oversight.
+5. **Only the JSON panes are coloured, and none has line numbers.** The YAML formatter's panes
+   are plain, and every error message still names a line the reader has to count to. Both fit the
+   same layer technique (§6.5); YAML needs a tokenizer that understands indentation, and line
+   numbers need a gutter that follows wrapped lines.
 6. **Reformatting YAML drops comments.** Inherent to parse-and-print; the page warns and a check
    pins the behaviour, but preserving them would need a CST-based emitter that js-yaml does not
    offer.

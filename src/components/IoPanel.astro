@@ -18,6 +18,11 @@ interface Props {
    * stay user-resizable either way.
    */
   minHeight?: string;
+  /**
+   * Adds a colour layer behind each textarea; the page's `attachTextIo` call
+   * supplies the colouring through its `highlight` option.
+   */
+  highlight?: boolean;
 }
 
 const {
@@ -26,6 +31,7 @@ const {
   placeholder = "Paste or type here…",
   swappable = false,
   minHeight,
+  highlight = false,
 } = Astro.props;
 ---
 
@@ -37,14 +43,17 @@ const {
       <button type="button" class="btn btn--tiny" id="io-sample" hidden>Sample</button>
       <button type="button" class="btn btn--tiny" id="io-clear">Clear</button>
     </div>
-    <textarea
-      id="io-input"
-      class="io__text"
-      placeholder={placeholder}
-      spellcheck="false"
-      autocomplete="off"
-      autocapitalize="off"
-      autocorrect="off"></textarea>
+    <div class:list={[highlight && "code"]}>
+      {highlight && <pre class="code__layer io__text" id="io-input-layer" aria-hidden="true" />}
+      <textarea
+        id="io-input"
+        class="io__text"
+        placeholder={placeholder}
+        spellcheck="false"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"></textarea>
+    </div>
   </div>
 
   <div class="io__pane">
@@ -67,7 +76,10 @@ const {
         <span data-label>Copy</span>
       </button>
     </div>
-    <textarea id="io-output" class="io__text" readonly spellcheck="false"></textarea>
+    <div class:list={[highlight && "code"]}>
+      {highlight && <pre class="code__layer code__layer--readonly io__text" id="io-output-layer" aria-hidden="true" />}
+      <textarea id="io-output" class="io__text" readonly spellcheck="false"></textarea>
+    </div>
   </div>
 </section>
 

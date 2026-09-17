@@ -1,6 +1,7 @@
 ---
 import ToolLayout from "../../layouts/ToolLayout.astro";
 import IoPanel from "../../components/IoPanel.astro";
+import { HIGHLIGHT_LIMIT } from "../../lib/jsonhighlight";
 ---
 
 <ToolLayout slug="json-formatter">
@@ -49,6 +50,7 @@ import IoPanel from "../../components/IoPanel.astro";
     placeholder="Paste JSON here…"
     swappable
     minHeight="30rem"
+    highlight
   />
 
   <section class="card prose">
@@ -56,7 +58,16 @@ import IoPanel from "../../components/IoPanel.astro";
     <p>
       Engines report a parse failure as a character offset — &ldquo;position 412&rdquo; — which is
       useless against a 2,000-character payload. The offset is converted to a line and column here
-      so you can go straight to the problem.
+      so you can go straight to the problem, and the character itself is marked in red in the input.
+    </p>
+
+    <h2>Colours</h2>
+    <p>
+      Keys, strings, numbers, <code>true</code>/<code>false</code>/<code>null</code> and punctuation
+      each get a colour, in both panes, as you type. Anything JSON does not allow &mdash; a comment,
+      a bare word, a quote that never closes &mdash; shows in red before you even run it. Documents
+      over {HIGHLIGHT_LIMIT.toLocaleString("en-US")} characters are shown plain, because
+      recolouring them on every keystroke would make typing lag.
     </p>
 
     <h2>Sorting keys is safe; sorting arrays is not</h2>
@@ -82,7 +93,8 @@ import IoPanel from "../../components/IoPanel.astro";
 </ToolLayout>
 
 <script>
-  import { formatJson } from "../../lib/jsonfmt";
+  import { findErrorIndex, formatJson } from "../../lib/jsonfmt";
+  import { HIGHLIGHT_LIMIT, highlightJson } from "../../lib/jsonhighlight";
   import type { Indent } from "../../lib/format";
   import { attachTextIo } from "../../lib/textio";
   import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
@@ -113,6 +125,7 @@ import IoPanel from "../../components/IoPanel.astro";
   const io = attachTextIo({
     downloadName: "formatted.json",
     sample: SAMPLE,
+    highlight: { render: highlightJson, locate: findErrorIndex, limit: HIGHLIGHT_LIMIT },
     transform(input) {
       const minify = minifying();
       savePrefs(PREFS_KEY, {

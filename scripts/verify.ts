@@ -210,12 +210,14 @@ console.log("\n-- passphrase --");
   const overlong = generatePassphrase(BIP39_EN, {
     ...base,
     separator: "custom",
-    customSeparator: "x".repeat(CUSTOM_SEPARATOR_MAX + 5),
+    // "#", not a letter: BIP39 words are a-z, so "box" + "xxxxxxxx" once made
+    // nine x's in a row and failed this check about one run in seventy.
+    customSeparator: "#".repeat(CUSTOM_SEPARATOR_MAX + 5),
     wordCount: 3,
   });
   check(
     `custom separator is capped at ${CUSTOM_SEPARATOR_MAX}`,
-    overlong.split("x".repeat(CUSTOM_SEPARATOR_MAX)).length === 3 && !overlong.includes("x".repeat(CUSTOM_SEPARATOR_MAX + 1)),
+    overlong.split("#".repeat(CUSTOM_SEPARATOR_MAX)).length === 3 && !overlong.includes("#".repeat(CUSTOM_SEPARATOR_MAX + 1)),
     overlong,
   );
 

@@ -8,6 +8,7 @@ import { decodeBase64, encodeBase64, bytesToBase64, base64ToBytes } from "../src
 import { hashBytes, hashText, toHex } from "../src/lib/hash";
 import { md5 } from "../src/lib/md5";
 import { findErrorIndex, formatJson } from "../src/lib/jsonfmt";
+import { HIGHLIGHT_LIMIT, highlightJson, tokenizeJson } from "../src/lib/jsonhighlight";
 import { convertYaml } from "../src/lib/yamlfmt";
 import { lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
@@ -831,6 +832,64 @@ export async function runToolChecks(check: Check): Promise<void> {
     check("spelled the way it is said", spellLunar({ day: 7, month: 8, year: 2026, leap: false }) === "Mùng 7 tháng Tám năm Bính Ngọ", spellLunar({ day: 7, month: 8, year: 2026, leap: false }));
     check("with Giêng, Chạp and nhuận", spellLunar({ day: 1, month: 1, year: 2025, leap: false }) === "Mùng 1 tháng Giêng năm Ất Tỵ" && spellLunar({ day: 23, month: 12, year: 2025, leap: false }) === "Ngày 23 tháng Chạp năm Ất Tỵ" && spellLunar({ day: 15, month: 6, year: 2025, leap: true }) === "Ngày 15 tháng Sáu nhuận năm Ất Tỵ");
     check("17/9/2026 is 7/8 Bính Ngọ", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })) === "7/8/2026", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })));
+  }
+
+  console.log("\n-- json highlighting --");
+  {
+    const visible = (html: string) =>
+      html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    const kinds = (text: string) =>
+      tokenizeJson(text)
+        .filter((t) => t.kind !== "space")
+        .map((t) => `${t.kind}:${text.slice(t.start, t.end)}`)
+        .join(" ");
+
+    // The layer and the textarea must hold the same characters, or the caret
+    // drifts off the text it edits. Fuzzed over JSON-ish noise, valid or not.
+    const ALPHABET = ['{', '}', '[', ']', ',', ':', '"', '\\', ' ', '\n', '\t', 'a', 'e', '1', '-', '.', 'n', 't', '<', '&', '/', 'ệ', '😀'];
+    let drift: string | null = null;
+    let gaps: string | null = null;
+    for (let n = 0; n < 3000 && drift === null && gaps === null; n += 1) {
+      let text = "";
+      const length = 1 + ((n * 7919) % 60);
+      for (let i = 0; i < length; i += 1) text += ALPHABET[(n * 31 + i * i * 17 + i) % ALPHABET.length];
+      const tokens = tokenizeJson(text);
+      if (tokens.some((t, i) => t.end <= t.start || (i > 0 && t.start !== tokens[i - 1]!.end)) || tokens.at(-1)?.end !== text.length) {
+        gaps = JSON.stringify(text);
+      }
+      const expected = text.endsWith("\n") ? `${text} ` : text;
+      if (visible(highlightJson(text)) !== expected) drift = JSON.stringify(text);
+    }
+    check("tokens tile every input exactly, with no gap or overlap", gaps === null, gaps ?? "");
+    check("the layer shows exactly the textarea's characters", drift === null, drift ?? "");
+
+    check("keys and string values are told apart", kinds('{"a": "b"}') === 'punct:{ key:"a" punct:: string:"b" punct:}', kinds('{"a": "b"}'));
+    check("a key may have its colon on the next line", kinds('{"a"\n  : 1}').includes('key:"a"'));
+    check("array strings are never keys", !kinds('["a", "b"]').includes("key"));
+    check("an escaped quote does not end a string", kinds('"say \\"hi\\""') === 'string:"say \\"hi\\""', kinds('"say \\"hi\\""'));
+    check("numbers, booleans and null", kinds("[-1.5e3, 0, true, false, null]") === "punct:[ number:-1.5e3 punct:, number:0 punct:, boolean:true punct:, boolean:false punct:, null:null punct:]", kinds("[-1.5e3, 0, true, false, null]"));
+    check("words JSON does not know are invalid", kinds("[undefined, NaN, True]") === "punct:[ invalid:undefined punct:, invalid:NaN punct:, invalid:True punct:]", kinds("[undefined, NaN, True]"));
+    check("a comment is invalid", kinds('{} // no').includes("invalid:/"), kinds('{} // no'));
+    check("an unclosed quote stops at the end of its line", kinds('{"a: 1,\n"b": 2}') === 'punct:{ invalid:"a: 1, key:"b" punct:: number:2 punct:}', kinds('{"a: 1,\n"b": 2}'));
+
+    const hostile = highlightJson('{"x": "<script>alert(1)</script> & more"}');
+    check("markup in the input is escaped", !hostile.includes("<script") && hostile.includes("&lt;script&gt;") && hostile.includes("&amp;"), hostile);
+
+    // The mark goes on the character the error message names.
+    const broken = '{"a": 1,}';
+    const at = findErrorIndex(broken);
+    check("the error mark lands on the offending character", at === 8 && highlightJson(broken, at).includes('<mark class="tok-error">}</mark>'), highlightJson(broken, at));
+    const truncated = '{"a": [1, 2';
+    check("an input that ends early gets an end marker", highlightJson(truncated, findErrorIndex(truncated)).endsWith('<mark class="tok-error tok-error--end"> </mark>'));
+    check("a mark on a newline keeps the line break", visible(highlightJson("[1\n,]", 2)) === "[1 \n,]", JSON.stringify(visible(highlightJson("[1\n,]", 2))));
+    check("no mark when there is no error", !highlightJson('{"a": 1}').includes("<mark"));
+    check("a trailing newline is kept visible", highlightJson("{}\n").endsWith("\n "));
+
+    // Budget check, printed rather than asserted: timing depends on the machine.
+    const big = JSON.stringify(Array.from({ length: 4000 }, (_, i) => ({ id: i, name: `item ${i}`, ok: i % 2 === 0, v: null })), null, 2).slice(0, HIGHLIGHT_LIMIT);
+    const t0 = performance.now();
+    highlightJson(big);
+    console.log(`     ${big.length.toLocaleString("en-US")} characters highlighted in ${(performance.now() - t0).toFixed(1)} ms`);
   }
 
   console.log("\n-- yaml --");

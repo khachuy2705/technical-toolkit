@@ -10,6 +10,18 @@ export interface TextIoOptions {
   downloadName: string;
   /** Loaded by the Sample button; the button stays hidden when omitted. */
   sample?: string;
+  /**
+   * Syntax colouring for both panes. Needs `<IoPanel highlight>`, which puts a
+   * `<pre>` layer behind each textarea.
+   */
+  highlight?: {
+    /** HTML for a layer. `errorAt` is -1, or the offset to mark in the input. */
+    render: (text: string, errorAt: number) => string;
+    /** Where a failed input broke, for the mark. Called only after a failure. */
+    locate?: (text: string) => number;
+    /** Above this many characters a pane is shown as plain text. */
+    limit: number;
+  };
 }
 
 export interface TextIo {
@@ -19,6 +31,42 @@ export interface TextIo {
 }
 
 const DEBOUNCE_MS = 140;
+
+/**
+ * One textarea with its colour layer. The textarea's own text is transparent
+ * and the layer underneath shows the same characters in colour, so typing,
+ * selection, copying and resizing all stay native.
+ */
+interface Layered {
+  paint: (text: string, errorAt?: number) => void;
+}
+
+function layer(textarea: HTMLTextAreaElement, options: TextIoOptions): Layered | null {
+  const pre = document.getElementById(`${textarea.id}-layer`);
+  const highlight = options.highlight;
+  if (!pre || !highlight) return null;
+  const wrapper = pre.parentElement!;
+
+  const follow = () => {
+    pre.scrollTop = textarea.scrollTop;
+    pre.scrollLeft = textarea.scrollLeft;
+  };
+  textarea.addEventListener("scroll", follow);
+
+  return {
+    paint(text, errorAt = -1) {
+      if (text.length > highlight.limit) {
+        // The textarea shows its own text again; no half-coloured document.
+        wrapper.dataset["plain"] = "";
+        pre.textContent = "";
+        return;
+      }
+      delete wrapper.dataset["plain"];
+      pre.innerHTML = highlight.render(text, errorAt);
+      follow();
+    },
+  };
+}
 
 function describe(text: string): string {
   if (text.length === 0) return "";
@@ -38,12 +86,19 @@ export function attachTextIo(options: TextIoOptions): TextIo {
   const inputMeta = el<HTMLElement>("#input-meta");
   const outputMeta = el<HTMLElement>("#output-meta");
 
+  const inputLayer = layer(input, options);
+  const outputLayer = layer(output, options);
+
   let timer: number | undefined;
   // Async transforms can land out of order once the parser import resolves.
   // Only the newest run is allowed to write to the DOM.
   let generation = 0;
 
   const render = (result: FormatResult): void => {
+    outputLayer?.paint(result.ok ? result.output : "");
+    if (inputLayer && !result.ok && options.highlight?.locate && input.value.length <= options.highlight.limit) {
+      inputLayer.paint(input.value, options.highlight.locate(input.value));
+    }
     if (result.ok) {
       output.value = result.output;
       errorBox.hidden = true;
@@ -60,6 +115,7 @@ export function attachTextIo(options: TextIoOptions): TextIo {
 
   const run = (): void => {
     inputMeta.textContent = describe(input.value);
+    inputLayer?.paint(input.value);
 
     if (input.value.length === 0) {
       render({ ok: true, output: "" });
@@ -91,6 +147,9 @@ export function attachTextIo(options: TextIoOptions): TextIo {
   };
 
   input.addEventListener("input", () => {
+    // The textarea's text is transparent, so its layer has to follow every
+    // keystroke at once; only the transform itself waits for a pause.
+    inputLayer?.paint(input.value);
     window.clearTimeout(timer);
     timer = window.setTimeout(run, DEBOUNCE_MS);
   });
