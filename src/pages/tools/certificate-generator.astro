@@ -1,0 +1,864 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { MODES, DEFAULT_DAYS, VALIDITY_PRESETS } from "../../lib/certgen";
+import { KEY_ALGOS } from "../../lib/keys";
+import { DN_FIELDS, PURPOSES, DEFAULT_PURPOSES } from "../../lib/x509";
+
+/** The three readonly panes, in the order the files are usually needed. */
+const PANES = [
+  {
+    id: "key",
+    label: "Private key",
+    hint: "PKCS#8, unencrypted. This is the half that must stay secret.",
+  },
+  { id: "cert", label: "Certificate", hint: "PEM. Hand this to the server, or install it as a trust anchor." },
+  { id: "chain", label: "Full chain", hint: "The certificate followed by its issuer — what most servers want." },
+] as const;
+---
+
+<ToolLayout slug="certificate-generator">
+  <section class="card">
+    <div class="segmented segmented--wide" role="radiogroup" aria-label="What to make">
+      {
+        MODES.map((mode, index) => (
+          <label>
+            <input type="radio" name="mode" value={mode.id} checked={index === 1} />
+            <span>{mode.label}</span>
+          </label>
+        ))
+      }
+    </div>
+    <p class="field__hint" id="mode-blurb" style="margin-top:0.75rem">{MODES[1]!.blurb}</p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Subject</h2>
+    <div class="io__head" style="margin-bottom:0.5rem">
+      <label class="io__label" for="dn-CN">Common name</label>
+      <span class="io__meta" id="cn-meta"></span>
+    </div>
+    <input
+      type="text"
+      id="dn-CN"
+      class="big-input"
+      placeholder="example.com"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+    />
+
+    <div class="controls" style="margin-top:1.25rem">
+      {
+        DN_FIELDS.filter((field) => field.id !== "CN").map((field) => (
+          <div class="field">
+            <label class="field__label" for={`dn-${field.id}`}>
+              {field.label}
+              <span class="field__hint" style="font-weight:400">{field.id}</span>
+            </label>
+            <input
+              type="text"
+              id={`dn-${field.id}`}
+              class="text-input"
+              data-dn={field.id}
+              placeholder={field.placeholder}
+              spellcheck="false"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+            />
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="card" id="card-sans">
+    <div class="io__head">
+      <label class="io__label" for="sans">Subject alternative names</label>
+      <span class="io__meta" id="sans-meta"></span>
+    </div>
+    <textarea
+      id="sans"
+      class="io__text"
+      style="--io-min-height:6rem;min-height:6rem"
+      placeholder={"example.com\nwww.example.com\n10.0.0.1\nadmin@example.com"}
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"></textarea>
+    <p class="field__hint" style="margin-top:0.5rem">
+      One per line, or comma-separated. Host names, IP addresses, email addresses and URLs are
+      told apart by their shape. Every browser matches on these and ignores the common name, so
+      the name in the address bar has to appear here too.
+    </p>
+  </section>
+
+  <section class="card" id="card-purpose">
+    <h2 class="card__title">What the certificate is for</h2>
+    <div class="field__group">
+      {
+        PURPOSES.map((purpose) => (
+          <label class="check">
+            <input
+              type="checkbox"
+              data-purpose={purpose.id}
+              checked={DEFAULT_PURPOSES.includes(purpose.id)}
+            />
+            <span class="check__text">
+              {purpose.label}
+              <span class="check__sample" style="font-family:var(--font-sans)">{purpose.hint}</span>
+            </span>
+          </label>
+        ))
+      }
+    </div>
+    <p class="field__hint" id="usage-preview" style="margin-top:0.75rem"></p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Key and validity</h2>
+    <div class="controls">
+      <div class="field">
+        <label class="field__label" for="algo">Key algorithm</label>
+        <select id="algo">
+          {
+            KEY_ALGOS.map((algo) => (
+              <option value={algo.id} selected={algo.id === "rsa-2048"}>
+                {algo.label}
+              </option>
+            ))
+          }
+        </select>
+        <p class="field__hint" id="algo-hint"></p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="hash">Signature hash</label>
+        <select id="hash">
+          <option value="SHA-256" selected>SHA-256</option>
+          <option value="SHA-384">SHA-384</option>
+          <option value="SHA-512">SHA-512</option>
+        </select>
+        <p class="field__hint">SHA-256 is right for almost everything.</p>
+      </div>
+
+      <div class="field">
+        <label class="field__label" for="days">Valid for (days)</label>
+        <input
+          type="number"
+          id="days"
+          class="number-input"
+          value={DEFAULT_DAYS.signed}
+          min="1"
+          max="36500"
+          step="1"
+          inputmode="numeric"
+        />
+        <div class="preset-row" style="margin-top:0.25rem">
+          {
+            VALIDITY_PRESETS.map((preset) => (
+              <button type="button" class="btn btn--tiny" data-days={preset.days}>
+                {preset.label}
+              </button>
+            ))
+          }
+        </div>
+        <p class="field__hint" id="days-hint"></p>
+      </div>
+
+      <div class="field" id="field-pathlen" hidden>
+        <label class="field__label" for="pathlen">Path length limit</label>
+        <select id="pathlen">
+          <option value="">No limit</option>
+          <option value="0">0 — may only issue end certificates</option>
+          <option value="1">1 — one sub-CA below it</option>
+          <option value="2">2 — two levels below it</option>
+        </select>
+        <p class="field__hint">How many CAs may sit between this one and a leaf certificate.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="card-issuer" hidden>
+    <h2 class="card__title">Signed by</h2>
+
+    <div class="field__group">
+      <label class="check">
+        <input type="radio" name="issuer" value="session" checked />
+        <span class="check__text">
+          The CA made in this tab
+          <span class="check__sample" id="session-ca" style="font-family:var(--font-sans)">
+            none yet — switch to Root CA and make one
+          </span>
+        </span>
+      </label>
+      <label class="check">
+        <input type="radio" name="issuer" value="upload" />
+        <span class="check__text">
+          A CA I paste in
+          <span class="check__sample" style="font-family:var(--font-sans)">
+            its certificate and its private key, both in PEM
+          </span>
+        </span>
+      </label>
+    </div>
+
+    <div id="issuer-upload" hidden style="margin-top:1rem">
+      <div class="io">
+        <div class="io__pane">
+          <div class="io__head">
+            <label class="io__label" for="ca-cert">CA certificate</label>
+            <span class="io__meta" id="ca-cert-meta"></span>
+          </div>
+          <textarea
+            id="ca-cert"
+            class="io__text"
+            style="--io-min-height:9rem;min-height:9rem"
+            placeholder="-----BEGIN CERTIFICATE-----"
+            spellcheck="false"
+            autocomplete="off"></textarea>
+        </div>
+        <div class="io__pane">
+          <div class="io__head">
+            <label class="io__label" for="ca-key">CA private key</label>
+            <span class="io__meta">never leaves the page</span>
+          </div>
+          <textarea
+            id="ca-key"
+            class="io__text"
+            style="--io-min-height:9rem;min-height:9rem"
+            placeholder="-----BEGIN PRIVATE KEY-----"
+            spellcheck="false"
+            autocomplete="off"></textarea>
+        </div>
+      </div>
+      <p class="field__hint" style="margin-top:0.5rem">
+        A passphrase-protected key has to be decrypted first:
+        <code>openssl pkcs8 -topk8 -nocrypt -in ca.key -out plain.key</code>. Paste a full chain in
+        the left box and the extra certificates are carried into the output chain.
+      </p>
+    </div>
+  </section>
+
+  <div class="output__actions" style="justify-content:flex-start">
+    <button type="button" class="btn btn--primary" id="generate">
+      <Icon paths={ICONS.refresh} size={16} strokeWidth={2} />
+      <span data-label>Generate</span>
+    </button>
+    <span class="field__hint" id="busy" hidden>Generating the key…</span>
+  </div>
+
+  <p class="output__error" id="error" role="alert" hidden></p>
+
+  <section id="results" hidden>
+    <ul class="facts" id="summary"></ul>
+
+    <div class="notes" id="notes" hidden></div>
+
+    <div class="card" id="ca-promote" hidden>
+      <div class="io__head">
+        <span class="io__label">This CA is ready to sign</span>
+        <button type="button" class="btn btn--tiny" id="use-ca">Sign a certificate with it</button>
+      </div>
+      <p class="field__hint" style="margin-top:0.5rem">
+        It is held in this tab only — nothing is written to storage. Download the key and the
+        certificate below if you want it back after a reload.
+      </p>
+    </div>
+
+    {
+      PANES.map((pane) => (
+        <section class="card pem" id={`pane-${pane.id}`}>
+          <div class="io__head">
+            <label class="io__label" for={`out-${pane.id}`}>{pane.label}</label>
+            <span class="io__meta" id={`${pane.id}-hint`}>{pane.hint}</span>
+            <button type="button" class="btn btn--tiny" data-save={pane.id}>
+              <Icon paths={ICONS.download} size={13} strokeWidth={1.9} />
+              <span data-label>Save</span>
+            </button>
+            <button type="button" class="btn btn--tiny" data-copy={pane.id}>
+              <Icon paths={ICONS.copy} size={13} strokeWidth={1.9} />
+              <span data-label>Copy</span>
+            </button>
+          </div>
+          <textarea
+            id={`out-${pane.id}`}
+            class="io__text pem__text"
+            readonly
+            spellcheck="false"
+          />
+        </section>
+      ))
+    }
+
+    <section class="card" id="keystore">
+      <h2 class="card__title">Keystore export</h2>
+      <p class="field__hint" style="margin-bottom:1rem">
+        One file holding the private key and the whole chain, under one password. PKCS#12 is what
+        a current JVM, Windows, macOS and OpenSSL all read. JKS is the legacy Java format — use it
+        only for a stack that insists on it.
+      </p>
+
+      <div class="controls">
+        <div class="field">
+          <label class="field__label" for="ks-password">Keystore password</label>
+          <input
+            type="text"
+            id="ks-password"
+            class="text-input"
+            placeholder="at least 6 characters"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <p class="field__hint">
+            Shown rather than masked: you have to type it into a config file in a minute, and
+            nothing here is transmitted.
+          </p>
+        </div>
+        <div class="field">
+          <label class="field__label" for="ks-alias">Alias</label>
+          <input
+            type="text"
+            id="ks-alias"
+            class="text-input"
+            placeholder="server"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <p class="field__hint">The entry name inside the keystore. Java lower-cases it.</p>
+        </div>
+      </div>
+
+      <div class="preset-row" style="margin-top:1rem">
+        <button type="button" class="btn" id="download-p12">
+          <Icon paths={ICONS.download} size={15} strokeWidth={1.9} />
+          <span data-label>Download .p12</span>
+        </button>
+        <button type="button" class="btn" id="download-jks">
+          <Icon paths={ICONS.download} size={15} strokeWidth={1.9} />
+          <span data-label>Download .jks</span>
+        </button>
+      </div>
+      <p class="output__error" id="ks-error" role="alert" hidden></p>
+
+      <div class="cmds" id="ks-cmds" hidden>
+        <p class="field__hint">Check what you just downloaded:</p>
+        <pre class="cmds__block"><code id="ks-verify"></code></pre>
+      </div>
+    </section>
+  </section>
+
+  <section class="card prose">
+    <h2>Nothing here is publicly trusted</h2>
+    <p>
+      A certificate is trusted because a CA already in the operating system&rsquo;s trust store
+      signed it. This page cannot do that, and nor can any other tool. What it makes is a
+      <b>private</b> PKI: useful for an internal service, a test environment, mutual TLS between
+      two systems you control, or a device that will never see the public internet. For a public
+      web site, make a CSR here and take it to a real CA &mdash; or use Let&rsquo;s Encrypt, which
+      is free and automatic.
+    </p>
+
+    <h2>Use a CA, not a self-signed certificate</h2>
+    <p>
+      The tempting shortcut is one self-signed certificate per server. It works, and then every
+      machine that talks to that server needs that exact certificate installed, and again next
+      year when it expires. Making a CA once and signing under it means the CA is what gets
+      installed &mdash; a ten-year certificate you distribute once &mdash; and every server
+      certificate after that is signed without touching any client again.
+    </p>
+
+    <h2>What the purposes actually set</h2>
+    <p>
+      Two extensions. <b>Key usage</b> says what the key may do &mdash; sign, encipher, certify
+      &mdash; and is marked critical, so software that understands it must obey it. <b>Extended
+      key usage</b> names the roles the certificate is for, as OIDs: server authentication, client
+      authentication, code signing, and so on. A TLS library will refuse a certificate whose
+      extended key usage does not include server authentication, which is the most common reason a
+      hand-made certificate is rejected with an error that mentions neither extension.
+    </p>
+    <p>
+      An ECDSA key is never given <code>Key Encipherment</code>, whatever is ticked: an EC key
+      cannot encipher a key, and claiming otherwise is a statement the key cannot honour. The root
+      CA gets no extended key usage at all, because an EKU on a CA silently constrains everything
+      beneath it.
+    </p>
+
+    <h2>Installing the CA</h2>
+    <ul>
+      <li><b>Linux:</b> copy the CA certificate into <code>/usr/local/share/ca-certificates/</code> and run <code>update-ca-certificates</code>.</li>
+      <li><b>macOS:</b> open it in Keychain Access, add it to the System keychain and set it to <em>Always Trust</em>.</li>
+      <li><b>Windows:</b> <code>certutil -addstore -f Root ca.crt</code>, as administrator.</li>
+      <li><b>Firefox</b> and <b>Java</b> keep their own trust stores and need the CA added separately.</li>
+    </ul>
+
+    <h2>Where the keys come from</h2>
+    <p>
+      Every key is generated by <code>crypto.subtle.generateKey()</code>, the browser&rsquo;s own
+      implementation, and signed with <code>crypto.subtle.sign()</code>. The certificate structure
+      &mdash; ASN.1 DER, X.509, PKCS#10, PKCS#12 and the JKS format &mdash; is built by this page.
+      No key is transmitted, stored or logged, and a reload loses everything, including the CA
+      held for signing. Download what you mean to keep.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    MODES,
+    DEFAULT_DAYS,
+    buildJavaKeystore,
+    buildP12,
+    generate,
+    toSessionCa,
+    type Bundle,
+    type GenerateInput,
+    type Mode,
+    type SessionCa,
+  } from "../../lib/certgen";
+  import { KEY_ALGOS, keyAlgoById, type HashName } from "../../lib/keys";
+  import {
+    DN_FIELDS,
+    KEY_USAGE_LABELS,
+    parseCertificate,
+    parseSans,
+    resolveUsage,
+    type Dn,
+    type PurposeId,
+  } from "../../lib/x509";
+  import { all, attachCopy, el, loadPrefs, readNumber, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-cert";
+
+  const modeRadios = all<HTMLInputElement>('input[name="mode"]');
+  const issuerRadios = all<HTMLInputElement>('input[name="issuer"]');
+  const cnInput = el<HTMLInputElement>("#dn-CN");
+  const cnMeta = el<HTMLElement>("#cn-meta");
+  const sansInput = el<HTMLTextAreaElement>("#sans");
+  const sansMeta = el<HTMLElement>("#sans-meta");
+  const algoSelect = el<HTMLSelectElement>("#algo");
+  const hashSelect = el<HTMLSelectElement>("#hash");
+  const daysInput = el<HTMLInputElement>("#days");
+  const pathLenSelect = el<HTMLSelectElement>("#pathlen");
+  const caCert = el<HTMLTextAreaElement>("#ca-cert");
+  const caKey = el<HTMLTextAreaElement>("#ca-key");
+  const generateButton = el<HTMLButtonElement>("#generate");
+  const busy = el<HTMLElement>("#busy");
+  const errorBox = el<HTMLElement>("#error");
+  const results = el<HTMLElement>("#results");
+  const summary = el<HTMLUListElement>("#summary");
+  const notes = el<HTMLElement>("#notes");
+  const ksPassword = el<HTMLInputElement>("#ks-password");
+  const ksAlias = el<HTMLInputElement>("#ks-alias");
+  const ksError = el<HTMLElement>("#ks-error");
+  const ksCmds = el<HTMLElement>("#ks-cmds");
+
+  const panes = {
+    key: el<HTMLTextAreaElement>("#out-key"),
+    cert: el<HTMLTextAreaElement>("#out-cert"),
+    chain: el<HTMLTextAreaElement>("#out-chain"),
+  };
+
+  /**
+   * The CA made in this tab. A module variable and nothing more: it is not
+   * written to storage, so a reload is the end of it, which is the whole
+   * security model of the feature.
+   */
+  let sessionCa: SessionCa | null = null;
+  let bundle: Bundle | null = null;
+
+  const mode = (): Mode => (modeRadios.find((r) => r.checked)!.value as Mode);
+  const issuerKind = (): "session" | "upload" => issuerRadios.find((r) => r.checked)!.value as "session" | "upload";
+
+  function subject(): Dn {
+    const dn: Dn = {};
+    for (const field of DN_FIELDS) {
+      const input = document.querySelector<HTMLInputElement>(`#dn-${field.id}`);
+      const value = input?.value.trim() ?? "";
+      if (value) dn[field.id] = value;
+    }
+    return dn;
+  }
+
+  function purposes(): PurposeId[] {
+    return all<HTMLInputElement>("[data-purpose]")
+      .filter((box) => box.checked)
+      .map((box) => box.dataset["purpose"] as PurposeId);
+  }
+
+  /* --------------------------------------------------- reacting to the form */
+
+  function syncMode(): void {
+    const current = mode();
+    el<HTMLElement>("#mode-blurb").textContent = MODES.find((m) => m.id === current)!.blurb;
+
+    const isCa = current === "ca";
+    el<HTMLElement>("#card-sans").hidden = isCa;
+    el<HTMLElement>("#card-purpose").hidden = isCa;
+    el<HTMLElement>("#field-pathlen").hidden = !isCa;
+    el<HTMLElement>("#card-issuer").hidden = current !== "signed";
+    el<HTMLElement>("#keystore").hidden = current === "csr";
+    el<HTMLElement>("#pane-chain").hidden = current !== "signed";
+
+    el<HTMLElement>('label[for="out-cert"]').textContent =
+      current === "csr" ? "Certificate request" : "Certificate";
+    el<HTMLElement>("#cert-hint").textContent =
+      current === "csr"
+        ? "PEM. Send this to the CA; keep the private key."
+        : "PEM. Hand this to the server, or install it as a trust anchor.";
+
+    generateButton.querySelector("[data-label]")!.textContent =
+      current === "ca" ? "Generate CA" : current === "csr" ? "Generate CSR" : "Generate certificate";
+  }
+
+  function syncIssuer(): void {
+    el<HTMLElement>("#issuer-upload").hidden = issuerKind() !== "upload";
+    const label = el<HTMLElement>("#session-ca");
+    label.textContent = sessionCa
+      ? `${sessionCa.name} — expires ${sessionCa.notAfter.toISOString().slice(0, 10)}`
+      : "none yet — switch to Root CA and make one";
+  }
+
+  /**
+   * `followHash` moves the hash to the one that pairs with the key — P-384 with
+   * SHA-384, and so on. Only when the user changes the algorithm: doing it on
+   * load would overwrite a hash they deliberately chose last visit.
+   */
+  function syncAlgo(followHash: boolean): void {
+    const algo = keyAlgoById(algoSelect.value);
+    el<HTMLElement>("#algo-hint").textContent = `${algo.note} · about ${algo.strength}-bit strength`;
+    if (followHash) hashSelect.value = algo.hash;
+  }
+
+  /** Shows the two extensions the ticked purposes add up to, before generating. */
+  function syncUsage(): void {
+    const algo = keyAlgoById(algoSelect.value);
+    const usage = resolveUsage(purposes(), algo.kind);
+    const preview = el<HTMLElement>("#usage-preview");
+    if (usage.usage.length === 0 && usage.eku.length === 0) {
+      preview.textContent = "Nothing ticked: the certificate will carry no key usage and no extended key usage.";
+      return;
+    }
+    const usageNames = usage.usage.map((name) => KEY_USAGE_LABELS[name]).join(", ");
+    preview.textContent =
+      `Key usage: ${usageNames || "none"}. Extended key usage: ${usage.ekuLabels.join(", ") || "none"}.` +
+      (usage.note ? ` ${usage.note}` : "");
+  }
+
+  function syncNames(): void {
+    const cn = cnInput.value.trim();
+    cnMeta.textContent = cn.length > 64 ? "too long — 64 characters maximum" : "";
+
+    const text = sansInput.value.trim();
+    if (text.length === 0) {
+      sansMeta.textContent = "";
+      return;
+    }
+    try {
+      const parsed = parseSans(text);
+      const counts = new Map<string, number>();
+      for (const san of parsed) counts.set(san.kind, (counts.get(san.kind) ?? 0) + 1);
+      sansMeta.textContent = [...counts].map(([kind, n]) => `${n} ${kind}`).join(", ");
+    } catch (error) {
+      sansMeta.textContent = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Reads a pasted CA back as soon as it lands, so a wrong file is obvious at
+   * the moment of pasting rather than after a key has been generated against it.
+   */
+  function syncCaCert(): void {
+    const meta = el<HTMLElement>("#ca-cert-meta");
+    if (caCert.value.trim().length === 0) {
+      meta.textContent = "";
+      return;
+    }
+    try {
+      const cert = parseCertificate(caCert.value);
+      const expiry = cert.notAfter.toISOString().slice(0, 10);
+      const expired = cert.notAfter.getTime() < Date.now();
+      meta.textContent = `${cert.subject} · ${cert.isCa ? "CA" : "not a CA"} · ${expired ? "expired" : "expires"} ${expiry}`;
+    } catch (error) {
+      meta.textContent = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  function syncDays(): void {
+    const days = readNumber(daysInput, DEFAULT_DAYS[mode()]);
+    const until = new Date(Date.now() + days * 86_400_000);
+    el<HTMLElement>("#days-hint").textContent = `Expires ${until.toISOString().slice(0, 10)}.`;
+  }
+
+  /* ------------------------------------------------------------ generating */
+
+  function fail(message: string): void {
+    errorBox.hidden = false;
+    errorBox.textContent = message;
+    results.hidden = true;
+  }
+
+  function currentInput(): GenerateInput {
+    return {
+      mode: mode(),
+      subject: subject(),
+      sans: mode() === "ca" ? [] : parseSans(sansInput.value),
+      purposes: mode() === "ca" ? [] : purposes(),
+      keyAlgoId: algoSelect.value,
+      hash: hashSelect.value as HashName,
+      days: readNumber(daysInput, DEFAULT_DAYS[mode()]),
+      pathLength: pathLenSelect.value === "" ? null : Number(pathLenSelect.value),
+      issuer:
+        issuerKind() === "upload"
+          ? { kind: "upload", certPem: caCert.value, keyPem: caKey.value }
+          : { kind: "session" },
+      sessionCa,
+    };
+  }
+
+  async function run(): Promise<void> {
+    errorBox.hidden = true;
+    ksError.hidden = true;
+    ksCmds.hidden = true;
+
+    let input: GenerateInput;
+    try {
+      input = currentInput();
+    } catch (error) {
+      // A malformed SAN throws while reading the form, before any work starts.
+      fail(error instanceof Error ? error.message : String(error));
+      return;
+    }
+
+    // The previous result goes away before the next one is made. An RSA 4096 key
+    // takes seconds, and leaving the old certificate and key on screen for that
+    // long invites copying the wrong one.
+    results.hidden = true;
+    bundle = null;
+
+    // The button has to say what the wait is for. The frame yield lets the busy
+    // state paint before generateKey blocks.
+    generateButton.disabled = true;
+    busy.hidden = false;
+    busy.textContent = `Generating a ${keyAlgoById(input.keyAlgoId).label} key…`;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    try {
+      bundle = await generate(input);
+      render(bundle, input);
+      savePreferences();
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    } finally {
+      generateButton.disabled = false;
+      busy.hidden = true;
+    }
+  }
+
+  function render(made: Bundle, input: GenerateInput): void {
+    results.hidden = false;
+
+    summary.replaceChildren(
+      ...made.summary.map((item) => {
+        const li = document.createElement("li");
+        li.className = item.wide ? "fact fact--wide" : "fact";
+
+        const head = document.createElement("div");
+        head.className = "fact__head";
+        const label = document.createElement("span");
+        label.className = "fact__label";
+        label.textContent = item.label;
+        head.append(label);
+
+        const value = document.createElement("span");
+        value.className = "fact__value fact__value--pem";
+        value.textContent = item.value;
+
+        const note = document.createElement("span");
+        note.className = "fact__note";
+        note.textContent = item.note ?? "";
+
+        li.append(head, value, note);
+        return li;
+      }),
+    );
+
+    notes.hidden = made.notes.length === 0;
+    notes.replaceChildren(
+      ...made.notes.map((text) => {
+        const p = document.createElement("p");
+        p.className = "notes__item";
+        p.textContent = text;
+        return p;
+      }),
+    );
+
+    panes.key.value = made.privateKeyPem;
+    panes.cert.value = made.certificatePem ?? made.csrPem ?? "";
+    panes.chain.value = made.chainPem ?? "";
+    el<HTMLElement>("#pane-chain").hidden = made.chainPem === null;
+
+    // A freshly made CA is offered as the issuer for the next certificate.
+    el<HTMLElement>("#ca-promote").hidden = made.mode !== "ca";
+    if (made.mode === "ca") {
+      void toSessionCa(input, made).then((ca) => {
+        sessionCa = ca;
+        syncIssuer();
+      });
+    }
+
+    if (ksAlias.value.trim().length === 0) ksAlias.value = made.fileBase.split(".")[0] ?? "server";
+  }
+
+  /* ------------------------------------------------------------- downloads */
+
+  function save(name: string, data: string | Uint8Array, type: string): void {
+    const blob = new Blob([data as BlobPart], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const EXTENSIONS: Record<string, string> = { key: "key", cert: "crt", chain: "fullchain.pem" };
+
+  for (const [id, pane] of Object.entries(panes)) {
+    attachCopy(el<HTMLButtonElement>(`[data-copy="${id}"]`), () => pane.value);
+    el<HTMLButtonElement>(`[data-save="${id}"]`).addEventListener("click", () => {
+      if (!bundle || pane.value.length === 0) return;
+      const extension = id === "cert" && bundle.mode === "csr" ? "csr" : EXTENSIONS[id]!;
+      save(`${bundle.fileBase}.${extension}`, pane.value, "application/x-pem-file");
+    });
+  }
+
+  /** Both keystores share the password and alias, and both refuse an empty one. */
+  async function exportKeystore(kind: "p12" | "jks"): Promise<void> {
+    ksError.hidden = true;
+    if (!bundle?.keystore) return;
+
+    const password = ksPassword.value;
+    const alias = ksAlias.value.trim() || "server";
+    if (password.length < 6) {
+      ksError.hidden = false;
+      ksError.textContent = "A keystore password must be at least 6 characters — Java refuses anything shorter.";
+      return;
+    }
+
+    try {
+      const bytes =
+        kind === "p12"
+          ? await buildP12(bundle.keystore, { password, alias })
+          : await buildJavaKeystore(bundle.keystore, { password, alias });
+      const name = `${bundle.fileBase}.${kind}`;
+      save(name, bytes, "application/x-pkcs12");
+
+      ksCmds.hidden = false;
+      el<HTMLElement>("#ks-verify").textContent =
+        kind === "p12"
+          ? `openssl pkcs12 -info -in ${name} -nokeys\nkeytool -list -v -storetype PKCS12 -keystore ${name}`
+          : `keytool -list -v -keystore ${name}`;
+    } catch (error) {
+      ksError.hidden = false;
+      ksError.textContent = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  el<HTMLButtonElement>("#download-p12").addEventListener("click", () => void exportKeystore("p12"));
+  el<HTMLButtonElement>("#download-jks").addEventListener("click", () => void exportKeystore("jks"));
+
+  el<HTMLButtonElement>("#use-ca").addEventListener("click", () => {
+    modeRadios.find((r) => r.value === "signed")!.checked = true;
+    issuerRadios.find((r) => r.value === "session")!.checked = true;
+    // Setting `.checked` fires no change event, so the mode's default validity
+    // has to be applied here too. Without it the leaf inherits the CA's ten
+    // years and trips the "outlives its CA" warning on the way out.
+    daysInput.value = String(DEFAULT_DAYS.signed);
+    syncMode();
+    syncIssuer();
+    syncDays();
+    cnInput.value = "";
+    cnInput.focus();
+    cnInput.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+
+  /* ------------------------------------------------------------ persistence */
+
+  /**
+   * Only the shape of the form is remembered — algorithm, validity, which
+   * purposes are ticked. No subject, no names, and above all no key: what this
+   * page generates is exactly what should not be written to storage.
+   */
+  function savePreferences(): void {
+    savePrefs(PREFS_KEY, {
+      mode: mode(),
+      algo: algoSelect.value,
+      hash: hashSelect.value,
+      days: daysInput.value,
+      purposes: purposes(),
+    });
+  }
+
+  function loadPreferences(): void {
+    const saved = loadPrefs(PREFS_KEY, {
+      mode: "signed" as string,
+      algo: "rsa-2048",
+      hash: "SHA-256",
+      days: String(DEFAULT_DAYS.signed),
+      purposes: ["tls-server"] as string[],
+    });
+
+    const modeRadio = modeRadios.find((r) => r.value === saved.mode);
+    if (modeRadio) modeRadio.checked = true;
+    if (KEY_ALGOS.some((a) => a.id === saved.algo)) algoSelect.value = saved.algo;
+    if (["SHA-256", "SHA-384", "SHA-512"].includes(saved.hash)) hashSelect.value = saved.hash;
+    if (/^\d+$/.test(String(saved.days))) daysInput.value = String(saved.days);
+    if (Array.isArray(saved.purposes)) {
+      for (const box of all<HTMLInputElement>("[data-purpose]")) {
+        box.checked = saved.purposes.includes(box.dataset["purpose"]!);
+      }
+    }
+  }
+
+  /* ----------------------------------------------------------------- wiring */
+
+  for (const radio of modeRadios) {
+    radio.addEventListener("change", () => {
+      daysInput.value = String(DEFAULT_DAYS[mode()]);
+      syncMode();
+      syncDays();
+    });
+  }
+  for (const radio of issuerRadios) radio.addEventListener("change", syncIssuer);
+  for (const box of all<HTMLInputElement>("[data-purpose]")) box.addEventListener("change", syncUsage);
+
+  algoSelect.addEventListener("change", () => {
+    syncAlgo(true);
+    syncUsage();
+  });
+  cnInput.addEventListener("input", syncNames);
+  sansInput.addEventListener("input", syncNames);
+  daysInput.addEventListener("input", syncDays);
+  caCert.addEventListener("input", syncCaCert);
+
+  for (const button of all<HTMLButtonElement>("[data-days]")) {
+    button.addEventListener("click", () => {
+      daysInput.value = button.dataset["days"]!;
+      syncDays();
+    });
+  }
+
+  generateButton.addEventListener("click", () => void run());
+
+  loadPreferences();
+  syncMode();
+  syncIssuer();
+  syncAlgo(false);
+  syncUsage();
+  syncNames();
+  syncDays();
+</script>

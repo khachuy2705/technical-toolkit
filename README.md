@@ -4,11 +4,12 @@ A static site collecting small developer and security tools. Everything runs cli
 there is no backend and no database. The only requests the site makes are for its own code from
 its own origin, and none of them carries anything you typed.
 
-Live tools: **password generator**, **passphrase generator**, **Base64 encoder/decoder**,
-**hash generator** (MD5/SHA-256/SHA-512), **JSON formatter**, **YAML formatter**,
-**epoch converter**, **lunar calendar converter** (âm lịch), and a network group: **subnet
-calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR splitter** and **IPv6
-calculator**. Tools are grouped on the home page — Network, Security, Data formats, Date & time.
+Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
+**hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
+**YAML formatter**, **epoch converter**, **lunar calendar converter** (âm lịch), and a network
+group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
+splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data
+formats, Date & time.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -24,8 +25,11 @@ and the security decisions. Read it before adding a tool.
 | Hosting | Vercel (static output, no adapter needed) |
 
 One runtime dependency: `js-yaml`, dynamically imported so only the YAML page downloads it. Every
-other tool is written from scratch. A tool page is a few kilobytes of JavaScript; the heavy pieces
-— wordlists, the YAML parser — are separate chunks fetched only when the feature is used.
+other tool is written from scratch, including the whole certificate stack — ASN.1/DER, X.509,
+PKCS#10, PKCS#12 and the Java keystore format. A tool page is a few kilobytes of JavaScript; the
+heavy pieces — wordlists, the YAML parser — are separate chunks fetched only when the feature is
+used. The certificate page is the largest at 12.8 KB gzipped, still an order of magnitude below
+the libraries it replaces.
 
 ## Commands
 
@@ -40,7 +44,11 @@ npm run preview   # serve dist/ locally
 
 `npm run verify` is the one to run after touching anything in `src/lib/`. It asserts uniformity of
 the RNG over hundreds of thousands of draws, the option constraints, the wordlist integrity, and
-the entropy arithmetic.
+the entropy arithmetic. For the certificate tools it leans on outside readers rather than on
+itself: every generated certificate is parsed and its signature verified by Node's
+`X509Certificate`, and where `openssl` is on PATH it parses the certificate and the CSR and opens
+the PKCS#12 with its own password derivation. OpenSSL is optional — those checks skip when it is
+absent.
 
 ## Deploying to Vercel
 
@@ -68,6 +76,13 @@ src/
 │   ├── ipv4.ts          Address parsing and subnet arithmetic
 │   ├── ipv6.ts          IPv6 parsing, RFC 5952 formatting, address types
 │   ├── iprange.ts       Range to CIDR, aggregation, supernet, splitting (IPv4 + IPv6)
+│   ├── asn1.ts          DER encoder and reader
+│   ├── pem.ts           PEM encode/decode, forgiving about pasted text
+│   ├── keys.ts          WebCrypto key generation, import and signing
+│   ├── x509.ts          Distinguished names, SANs, purposes, certificates, CSRs
+│   ├── pkcs12.ts        .p12 keystores — PBES2 key, RFC 7292 MAC
+│   ├── jks.ts           .jks keystores — Sun's legacy Java format
+│   ├── certgen.ts       One form in, one bundle of files out
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
@@ -114,6 +129,14 @@ attacker searches assuming they know every setting on the page. Pattern-matching
 zxcvbn answer a different question and would understate a genuinely random output.
 Where a choice is ambiguous the count is deliberately conservative — the random *position* of an
 appended digit or symbol in a passphrase is real entropy that the tool does not claim.
+
+**Certificates are built, not borrowed.** Keys come from `crypto.subtle`; everything wrapped
+around them — DER, X.509, PKCS#10, PKCS#12, JKS — is written here, because there is no browser API
+for it and the alternative was a dependency far larger than the site. The sharp edges are recorded
+in [design.md](design.md) §8.6: ECDSA signatures need reshaping from WebCrypto's raw `r || s` into
+DER, an ECDSA certificate must never claim `keyEncipherment`, a root CA must carry no EKU, and a
+.p12 needs two different key derivations because its MAC predates PBKDF2's use here. A CA made on
+the page lives in memory for the tab and is never written to storage.
 
 **Content Security Policy.** `script-src` allows `'unsafe-inline'` for one reason: the theme script
 in `<head>` must run synchronously before first paint to avoid a white flash, and moving it to a

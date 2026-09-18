@@ -28,6 +28,12 @@ import { SITE } from "../data/site";
       settings for each tool so they persist between visits. Clearing site data removes both.
       Generated passwords and passphrases are never written to storage.
     </p>
+    <p>
+      The same goes for keys. The certificate generator saves which algorithm and validity you last
+      picked, and nothing else &mdash; no subject, no host names, and no key material. A certificate
+      authority made on that page is held in memory for as long as the tab is open and is gone on
+      reload, which is why the page tells you to download what you want to keep.
+    </p>
 
     <h2>Hosting</h2>
     <p>

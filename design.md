@@ -77,6 +77,13 @@ src/
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
+│   ├── asn1.ts            DER encoder and reader — the floor under X.509
+│   ├── pem.ts             PEM encode/decode, forgiving about pasted text
+│   ├── keys.ts            WebCrypto key generation, import, signing
+│   ├── x509.ts            DN, SANs, purposes, certificate and CSR builders
+│   ├── pkcs12.ts          .p12 — PBES2 for the key, the RFC 7292 KDF for the MAC
+│   ├── jks.ts             .jks — Sun's legacy Java keystore
+│   ├── certgen.ts         Ties those together: one form in, one bundle out
 │   ├── format.ts          Shared result type, line/column, deep key sort
 │   ├── jsonfmt.ts         Format/minify/sort + engine-independent locator
 │   ├── jsonhighlight.ts   Forgiving JSON scanner → highlighted HTML
@@ -117,6 +124,7 @@ src/
 │       ├── hash-generator.astro
 │       ├── json-formatter.astro
 │       ├── yaml-formatter.astro
+│       ├── certificate-generator.astro
 │       ├── subnet-calculator.astro
 │       ├── ip-range-to-cidr.astro
 │       ├── cidr-aggregator.astro
@@ -128,8 +136,10 @@ src/
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 3664 lines of logic in `lib/`, 681 of components and layouts, 4278 of pages, 1877 of
-CSS, 1563 of verification. The wordlist modules are generated and excluded from that count.
+Rough scale: 6162 lines of logic in `lib/`, 681 of components and layouts, 5148 of pages, 1960 of
+CSS, 2221 of verification. The wordlist modules are generated and excluded from that count. The
+certificate stack (`asn1` through `certgen`) is about 2,500 of the `lib/` total — the largest
+single feature in the project, and the reason §8.6 exists.
 
 ---
 
@@ -649,7 +659,48 @@ own 2004 example, the 1968 and 1985 Hanoi/Beijing splits, the 2033 leap month 11
 days (Tết 2024 was a Giáp Thìn day, month and year), and a round trip over all 109,573 days of
 the range.
 
-### 6.14 Shared tool chrome
+### 6.14 Certificate & CSR generator — `/tools/certificate-generator/`
+
+One page, three modes, because all three share a CA and a subject form:
+
+| Mode | Signs with | Produces |
+|---|---|---|
+| **Root CA** | its own new key | a self-signed CA certificate + key |
+| **Certificate signed by a CA** | the CA made in this tab, or one pasted in | a leaf certificate + key + chain |
+| **Certificate request (CSR)** | its own new key | a PKCS#10 request + key |
+
+| Control | Options | Default |
+|---|---|---|
+| Subject | CN, O, OU, L, ST, C, emailAddress | — (CN required) |
+| Subject alternative names | DNS, IP, email, URI — one per line or comma-separated | — |
+| Purpose | TLS server, TLS client, document signing, code signing, S/MIME, timestamping | **TLS server** |
+| Key | RSA 2048/3072/4096, ECDSA P-256/P-384/P-521 | RSA 2048 |
+| Signature hash | SHA-256/384/512, following the key unless overridden | SHA-256 |
+| Validity | days, with 90 / 398 / 825 / 10-year presets | 825 (CA: 3650) |
+| Path length | no limit, 0, 1, 2 — CA mode only | no limit |
+| Export | PEM (key, certificate, chain), PKCS#12, JKS | — |
+
+- **SAN kinds are inferred from shape**, not chosen from a dropdown: `@` is an address, `://` a
+  URI, dotted digits IPv4, colons IPv6, anything else a host name. A wildcard outside the leftmost
+  label is refused by name, as is a malformed host.
+- **Purposes drive two extensions.** The ticked set unions into `keyUsage` (critical) and
+  `extKeyUsage`. The page shows the resulting extensions live, before anything is generated,
+  because the most common failure of a hand-made certificate is a missing EKU.
+- **The session CA is memory only.** A CA generated here is held in a module variable so the next
+  certificate can be signed immediately; nothing is written to storage and a reload loses it. The
+  page says so, and offers a **Sign a certificate with it** button that switches mode in place.
+  Persisting CAs is deliberately not built — see §12.
+- **A pasted CA is read as it is pasted**, showing its subject, whether it is a CA, and its expiry,
+  so a wrong file is obvious before a key is generated against it.
+- **The key and certificate are proved to match** before signing, by signing a random probe with
+  the pasted key and verifying it with the certificate's public key. Pasting a mismatched pair is
+  the most common mistake here and otherwise produces a certificate that fails only in production.
+- **Warnings that do not stop generation** are separated from errors: a TLS certificate with no
+  SANs, no purpose ticked at all, a leaf that outlives its CA, an issuer not marked `CA:TRUE`.
+- Only the shape of the form is remembered in `localStorage` — algorithm, validity, ticked
+  purposes. No subject, no names, and no key material.
+
+### 6.15 Shared tool chrome
 
 The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text tools share
 `IoPanel` and `lib/textio.ts`:
@@ -687,7 +738,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
 
-### 6.15 Site-wide
+### 6.16 Site-wide
 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
@@ -799,12 +850,53 @@ hash-based CSP was considered and rejected — it would break silently the momen
 script. `style-src` needs `'unsafe-inline'` for Astro's scoped styles and a few inline `style`
 attributes.
 
+### 8.6 Certificates: what is hand-written, and why
+
+Every key is generated and every signature made by WebCrypto. What this project writes is the
+*structure* around them — ASN.1 DER, X.509, PKCS#10, PKCS#12, JKS — because there is no browser
+API for any of it and the alternative was a dependency an order of magnitude larger than the site.
+
+That structure is where the sharp edges are, and four of them are worth recording:
+
+1. **ECDSA signatures come out of WebCrypto in the wrong shape.** `crypto.subtle.sign` returns the
+   raw `r || s` of IEEE P1363; X.509 wants `SEQUENCE { INTEGER r, INTEGER s }`. Omitting the
+   conversion yields a certificate that parses cleanly and verifies nowhere.
+2. **RSA signature algorithms carry an explicit NULL parameter; ECDSA ones must carry none.** Both
+   are in RFC 4055, and both are easy to get backwards.
+3. **An ECDSA certificate is never given `keyEncipherment`.** An EC key cannot encipher a key, so
+   the bit is a claim the key cannot honour. It is dropped whatever the user ticks, and the page
+   says it was.
+4. **A root CA gets no extended key usage.** An EKU on a CA constrains everything issued beneath
+   it, which is a decision for someone deliberately building a constrained sub-CA, not a default.
+
+**Two key derivations live in one .p12.** The private key is encrypted with PBES2 —
+PBKDF2-HMAC-SHA256 at 200,000 rounds into AES-256-CBC — all of which WebCrypto does natively. The
+integrity MAC cannot use PBKDF2: RFC 7292 specifies its own KDF (appendix B.2), so that one is
+written out by hand at the customary 2,048 rounds. PBMAC1 (RFC 9579) would be PBKDF2 and much
+nicer, but it is from 2024 and nothing old enough to still want a .p12 can read it. Certificates go
+in unencrypted — they are public by construction, and leaving them readable means `openssl pkcs12
+-info -nokeys` can list the file without the password.
+
+**JKS is included under protest.** Its key protection is a SHA-1 keystream XOR with no iteration
+count and no MAC over the key itself, which is indefensible by any modern reading and cannot be
+fixed from here: it is the format. It exists for the JDK 8 Tomcat and the appliance whose config
+says `storetype JKS`. The page offers .p12 first and says which to prefer. The format is defined
+only by the source of `sun.security.provider.JavaKeyStore`, and one detail that source does not
+make obvious cost a bug: the key protector's `AlgorithmIdentifier` must carry an explicit NULL
+parameter. ASN.1 makes it optional and Java itself reads only the OID, so omitting it produces a
+keystore Java opens happily — and that other readers refuse outright. A check now pins it (§9).
+
+**Nothing is persisted.** A CA made on the page lives in a module variable for the life of the tab.
+Storing private keys in `localStorage` was considered and deferred rather than built: it is a real
+convenience with a real cost, and it deserves its own decision (§12) rather than arriving as a
+side effect of this tool.
+
 ---
 
 ## 9. Verification
 
 ```bash
-npm run verify   # 497 checks, Node, no browser
+npm run verify   # 612 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -847,6 +939,25 @@ npm run build    # runs check first, then the static build
   additionally checked for its defining property: 2,048 words unique in their first four letters.
 - **Shipped pool sizes** — the default pool is 2,140 words and all three ticked is 2,967, asserted
   as literals so adding or dropping a list cannot quietly change the entropy the page reports.
+- **DER** — length encoding at 0/127/128/255/65535/65536, INTEGER sign padding and zero
+  stripping, OID encoding both ways, `KeyUsage` named bits with the right unused-bit count, and
+  the UTCTime/GeneralizedTime switch at 2050.
+- **Certificates** — every generated certificate is parsed by **Node's `X509Certificate`**, which
+  reports the subject, issuer, SANs, validity and CA flag, and **verifies the signature**. A leaf
+  is checked against its CA with `verify()` and `checkIssued()`, for an RSA CA signing an EC leaf
+  and for an ECDSA P-384 CA, which is what catches a raw-versus-DER ECDSA signature.
+- **OpenSSL**, when on PATH, parses the certificate and the CSR, checks the CSR's self-signature
+  with `req -verify`, confirms the AKI matches the issuing CA's SKI, and opens the .p12 —
+  deriving the PBES2 key from the password, decrypting the private key, and proving the key
+  inside matches the certificate beside it. A wrong password is asserted to fail.
+- **Refusals and warnings** — that a missing CN, a three-letter country, zero days and a key
+  belonging to a different CA are all refused with a message; and that a TLS certificate with no
+  SANs, no purpose at all, an issuer that is not a CA, and a leaf outliving its CA each produce a
+  warning without blocking generation.
+- **JKS** — magic, version, entry layout, the lower-cased alias, the trailing
+  `SHA-1(password || "Mighty Aphrodite" || body)` digest recomputed independently, the key
+  protector undone back to the original PKCS#8, and the explicit NULL parameter that §8.6
+  describes.
 
 **Structural passphrase assertions draw from BIP39, deliberately.** They split a phrase on its
 separator to count words, and the EFF short list ships a hyphenated entry (`yo-yo`) that breaks
@@ -897,6 +1008,13 @@ Run it after touching anything in `src/lib/`.
 headless Chrome over the DevTools protocol — type into the page, read the DOM, take screenshots,
 collect uncaught exceptions. The scripts are throwaway and not in the repository; §11 gap 2 is
 about making that permanent.
+
+The certificate tool was driven that way end to end: all three modes, a CA promoted to sign a
+leaf, both keystores downloaded through Chrome's own download path, and the downloaded files then
+opened by **OpenSSL** (.p12) and **pyjks** (.jks) outside the browser. `openssl verify` accepts the
+chain the page produced. That run caught three things a build cannot: `[hidden]` being defeated by
+`.field { display: flex }`, the saved signature hash being overwritten on load, and a leaf
+inheriting its CA's ten-year validity when promoted.
 
 ---
 
@@ -995,6 +1113,15 @@ Honest list, in rough order of how much they matter:
     stayed on UTC+8, is not modelled.
 13. **Planned tools are registry entries only.** The UUID and JWT tools have cards and nothing
     behind them.
+14. **The JKS checks in the repository have no independent oracle.** `npm run verify` undoes the
+    format with the same understanding that wrote it, so it catches a regression but would not
+    catch a misreading of Sun's source. The files *were* validated during development by
+    **pyjks**, which is what found the missing NULL parameter described in §8.6 — but pyjks needs
+    a C compiler to install and keytool needs a JDK, so neither is a dependency the verification
+    can assume. The PKCS#12 has no such gap: OpenSSL checks it on every run where OpenSSL exists.
+15. **No certificate *decoder*.** The ASN.1 reader in `asn1.ts` and `parseCertificate` in
+    `x509.ts` already do most of the work the decoder idea in §12 called for, but there is no page
+    that takes a PEM and explains it.
 
 ---
 
@@ -1014,6 +1141,19 @@ Asked and answered before building §6.8–§6.11:
 | VLSM (allocate by host counts) in the splitter? | **No** — equal splits only |
 | IPv6 in the range, aggregator and splitter tools now or later? | **Now** — one `bigint` implementation serves both families |
 
+### Decisions on the certificate tool
+
+Asked and answered before building §6.14:
+
+| Question | Decision |
+|---|---|
+| One page with modes, or separate pages per mode? | **One page, three modes** — all three share the CA and the subject form |
+| What should the "Java" export be? | **Both** — a .p12 for a modern JVM and a real .jks for the stacks that insist |
+| Where do saved CAs live? | **Nowhere, for now** — memory only for the tab. Persistence is its own decision |
+| A library (PKI.js, node-forge) or hand-written? | **Hand-written** — 12.8 KB gzipped against an order of magnitude more, and §1 |
+| Ed25519 keys? | **No** — WebCrypto support is too recent to rely on, and few stacks accept the certificates |
+| Legacy PKCS#12 encryption (3DES)? | **No** — WebCrypto has no 3DES, so PBES2/AES only |
+
 ### Done
 
 | Area | What |
@@ -1022,6 +1162,7 @@ Asked and answered before building §6.8–§6.11:
 | Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML |
 | Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
 | Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
+| Certificates | Root CA, CA-signed certificates and CSRs; purpose-driven key usage and EKU; PEM, PKCS#12 and JKS export |
 | Site | Tool groups on the home page, group links in the header, sibling strip, Vietnamese chrome for the lunar page |
 
 ### In progress
@@ -1041,6 +1182,12 @@ Nothing is half-built. Every tool in the registry marked `live` is complete and 
 4. **Passphrase default** (gap 1): per-wordlist recommended word counts so the default reaches
    *Strong*.
 5. **YAML highlighting and line numbers** (gap 5), on the same layer technique as JSON.
+6. **Certificate decoder** (gap 15): PEM in, subject, SANs, validity, key and fingerprints out.
+   Most of the cost was the ASN.1 reader, which §6.14 already paid.
+7. **Saved CAs** (§6.14): the deferred half of the certificate tool. The question it has to answer
+   first is not technical — an unencrypted private key in `localStorage` is a real cost on a site
+   whose whole claim is that nothing leaves the browser, and a passphrase-wrapped one trades that
+   for a passphrase the user can lose. Not built until that is decided rather than defaulted.
 
 ### Ideas not yet scheduled
 
@@ -1050,8 +1197,8 @@ Collected while planning; all fit the static, nothing-leaves-the-browser constra
   `OnCalendar` too.
 - **chmod / umask calculator** — octal ↔ `rwx` ↔ symbolic, with setuid/setgid/sticky.
 - **Regex tester** — JavaScript dialect, stated as such; matches, named groups, replacement preview.
-- **Certificate / CSR decoder** — PEM in, subject, SANs, validity, key and fingerprints out;
-  fingerprints reuse `hash.ts`, the ASN.1 parser is the real work.
+- ~~**Certificate / CSR decoder**~~ — promoted to the list above now that §6.14 has written the
+  ASN.1 reader that was "the real work".
 - **MAC address tool** — format normalisation, EUI-64, U/L and multicast bits, and an OUI vendor
   lookup (the one idea with a sizeable dataset, ~300 KB lazy-loaded).
 - **URL parser and encoder**, **data size and transfer-time calculator**, **HMAC** (a small

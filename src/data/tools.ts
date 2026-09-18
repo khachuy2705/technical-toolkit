@@ -93,6 +93,30 @@ export const TOOLS: readonly Tool[] = [
     vi: { name: 'Tạo mã băm', tagline: 'MD5, SHA-256 và SHA-512 cho văn bản hoặc tệp.' },
   },
   {
+    slug: 'certificate-generator',
+    name: 'Certificate & CSR Generator',
+    tagline: 'Your own CA, and the certificates under it.',
+    description:
+      'Generate a root CA, sign server and client certificates with it, or build a CSR to send to a real CA. Pick what each certificate is for, then export as PEM, PKCS#12 or a Java keystore. Keys are generated in your browser and never leave it.',
+    keywords: [
+      'certificate generator',
+      'csr generator',
+      'self signed certificate',
+      'create root ca',
+      'openssl alternative',
+      'pkcs12 p12 keystore',
+      'java keystore jks',
+      'x509',
+    ],
+    icon: '<path d="M12 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z"/><path d="M8.5 11.5 7 22l5-3 5 3-1.5-10.5"/>',
+    status: 'live',
+    group: 'security',
+    vi: {
+      name: 'Tạo chứng thư số / CSR',
+      tagline: 'Tự tạo CA và cấp chứng thư bên dưới nó.',
+    },
+  },
+  {
     slug: 'subnet-calculator',
     name: 'Subnet Calculator',
     tagline: 'Type an IP and prefix, get the whole network.',

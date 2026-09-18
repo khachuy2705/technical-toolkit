@@ -1875,3 +1875,86 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --------------------------------------------------------------------------- Certificate tool */
+
+/* Three modes that change the whole form, so the switch spans the card rather
+   than sitting inline the way a two-state segmented control does. */
+.segmented--wide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  width: 100%;
+}
+
+.segmented--wide span {
+  justify-content: center;
+  text-align: center;
+}
+
+/* A PEM block is 64 columns wide and wants to be read as one, so these panes
+   never wrap and never shrink the text to fit. */
+.pem__text {
+  min-height: 11rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.pem .io__head {
+  margin-bottom: 0.5rem;
+}
+
+/* Summary values are fingerprints and distinguished names: long, monospaced,
+   and worth wrapping rather than truncating. */
+.fact__value--pem {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* Things that are true about the certificate and worth saying, but not errors:
+   a missing SAN, a leaf that outlives its CA. Amber, not red. */
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.notes__item {
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--strength-2);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.cmds {
+  margin-top: 1rem;
+}
+
+.cmds__block {
+  margin-top: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* An author `display` beats the user agent's `[hidden]` rule, so anything this
+   page toggles and also lays out needs to say so explicitly. `.card` is safe —
+   it sets no display — but these two are not. */
+.field[hidden],
+.notes[hidden] {
+  display: none;
+}
