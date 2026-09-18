@@ -84,6 +84,7 @@ src/
 │   ├── pkcs12.ts          .p12 — PBES2 for the key, the RFC 7292 KDF for the MAC
 │   ├── jks.ts             .jks — Sun's legacy Java keystore
 │   ├── certgen.ts         Ties those together: one form in, one bundle out
+│   ├── openssl.ts         The same form, as a script you could have run instead
 │   ├── format.ts          Shared result type, line/column, deep key sort
 │   ├── jsonfmt.ts         Format/minify/sort + engine-independent locator
 │   ├── jsonhighlight.ts   Forgiving JSON scanner → highlighted HTML
@@ -713,6 +714,12 @@ it too, for an intermediate to be signed by someone else's root.
   the most common mistake here and otherwise produces a certificate that fails only in production.
 - **Warnings that do not stop generation** are separated from errors: a TLS certificate with no
   SANs, no purpose ticked at all, a leaf that outlives its CA, an issuer not marked `CA:TRUE`.
+- **The equivalent OpenSSL script is shown, and it moves as you type.** Every field feeds it:
+  the subject, the key algorithm, each ticked purpose, the validity, the keystore alias. It sits
+  above the Generate button rather than in the results, because its main use is to be read
+  *instead* of pressing the button — a CA key worth protecting should not be pasted into a
+  browser, and the tool says so and hands over the commands. The script is POSIX `sh`; the
+  extensions reach `openssl x509` through a heredoc, which PowerShell has no equivalent of.
 - Only the shape of the form is remembered in `localStorage` — algorithm, validity, ticked
   purposes. No subject, no names, and no key material.
 
@@ -917,6 +924,27 @@ to be forgiving about pasted text, keeps the letters in `ProcType` and `ENCRYPTE
 key silently. The headers are split off on a blank line instead, and only when a blank line
 actually closes them — otherwise base64 containing a colon would be mistaken for a header.
 
+**The OpenSSL script is a claim, so it is executed.** Showing commands that look right and do
+something else would be worse than showing none, so the verification writes the displayed script to
+a file, runs it with `sh`, and diffs the resulting certificate against the page's. Three things
+that reads as correct turned out not to be, and only running it found them:
+
+- **`-utf8` is not optional.** Without it OpenSSL reads `-subj` as Latin-1, so `O=Công ty ABC`
+  becomes `O=CÃ´ng ty ABC` — a valid certificate with the wrong name in it, from a command that
+  reported success. For this tool's audience that is the common case, not an edge one.
+- **`-subj` values need escaping** for `/`, `+` and `=`, which OpenSSL reads as structure. `O=A/B
+  Ltd` silently becomes two attributes otherwise.
+- **Git Bash rewrites a leading `/`.** `-subj '/CN=x'` arrives as `C:/Program Files/Git/CN=x`,
+  and the error names neither the shell nor the cause. The script stays correct POSIX and the page
+  carries the `MSYS_NO_PATHCONV=1` note instead of contorting itself for one shell.
+
+**What the script deliberately does not carry** is a passphrase. `-passin`/`-passout` on a command
+line puts a key's passphrase in the shell history and in `ps`, so the commands let OpenSSL prompt,
+and a check asserts no `-pass` flag ever appears in the output. Extensions go in the CSR only when
+the CSR is bound for someone else's CA; when the page's own script signs it, `x509 -req` takes them
+from `-extfile` and ignores the CSR's, so repeating them would only raise the question of which
+copy wins.
+
 **Nothing is persisted.** A CA made on the page lives in a module variable for the life of the tab.
 Storing private keys in `localStorage` was considered and deferred rather than built: it is a real
 convenience with a real cost, and it deserves its own decision (§12) rather than arriving as a
@@ -927,7 +955,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 650 checks, Node, no browser
+npm run verify   # 698 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -998,6 +1026,13 @@ npm run build    # runs check first, then the static build
   and a certificate is signed end to end with an encrypted CA key.
 - **PEM headers** — that a `Proc-Type`/`DEK-Info` block's body survives intact, that the headers
   are read, and that ordinary base64 is never mistaken for a header.
+- **The OpenSSL script is run, not inspected.** For five shapes of form — two roots, a TLS leaf,
+  an intermediate and a document-signing certificate — the script the page displays is written to
+  a file, executed with `sh`, and the certificate that falls out is compared field by field
+  against the one the page builds from the same form. `openssl verify` then validates what the
+  script signed. A sixth case puts `/`, `+` and an apostrophe in the subject and asserts the name
+  survives the shell, `-subj` and the certificate intact. This is the only way the claim
+  "these commands do what the button does" can be made honestly.
 - **JKS** — magic, version, entry layout, the lower-cased alias, the trailing
   `SHA-1(password || "Mighty Aphrodite" || body)` digest recomputed independently, the key
   protector undone back to the original PKCS#8, and the explicit NULL parameter that §8.6
@@ -1061,7 +1096,9 @@ chain the page produced. That run caught three things a build cannot: `[hidden]`
 inheriting its CA's ten-year validity when promoted. The later round that added intermediates,
 encrypted keys and DER loading was driven the same way, and caught a fourth: promoting a CA left
 the *this is itself a CA* box ticked, so the next certificate would quietly have been a second
-intermediate.
+intermediate. The round that added the OpenSSL panel went one step further — the script was read
+out of the rendered DOM and run outside the browser, which is the only way to know that what a
+visitor can copy is what was tested.
 
 ---
 
@@ -1213,6 +1250,9 @@ Asked and answered before building §6.14:
 | A fourth mode for intermediates? | **No** — a tick box in the signed mode, since everything else about the form is identical |
 | Decrypt CA keys in the page? | **Yes**, for PBES2 and the traditional `DEK-Info` PEM. Refuse DES/3DES/RC2 by name |
 | Accept binary DER? | **Yes**, through a file picker — a textarea cannot take binary, and `.crt` files are everywhere |
+| Show the equivalent OpenSSL commands? | **Yes, live** — and run them in the verification, since an unrunnable command is worse than none |
+| Which shell for the script? | **POSIX `sh` only** — the extensions need a heredoc, which PowerShell has no equivalent of |
+| Put the passphrase in the shown commands? | **Never** — `-passin` leaks into shell history and `ps`; let OpenSSL prompt |
 
 ### Done
 

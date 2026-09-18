@@ -28,8 +28,8 @@ One runtime dependency: `js-yaml`, dynamically imported so only the YAML page do
 other tool is written from scratch, including the whole certificate stack — ASN.1/DER, X.509,
 PKCS#10, PKCS#12 and the Java keystore format. A tool page is a few kilobytes of JavaScript; the
 heavy pieces — wordlists, the YAML parser — are separate chunks fetched only when the feature is
-used. The certificate page is the largest at 14.1 KB gzipped, still an order of magnitude below
-the libraries it replaces.
+used. The certificate page is the largest at 16 KB gzipped, still an order of magnitude below the
+libraries it replaces.
 
 ## Commands
 
@@ -48,7 +48,9 @@ the entropy arithmetic. For the certificate tools it leans on outside readers ra
 itself: every generated certificate is parsed and its signature verified by Node's
 `X509Certificate`, and where `openssl` is on PATH it parses the certificate and the CSR and opens
 the PKCS#12 with its own password derivation. OpenSSL is optional — those checks skip when it is
-absent.
+absent. The OpenSSL commands the certificate page displays are checked by *running* them: the
+script is executed with `sh` and the certificate it produces is compared against the one the page
+builds from the same form.
 
 ## Deploying to Vercel
 
@@ -83,6 +85,7 @@ src/
 │   ├── pkcs12.ts        .p12 keystores — PBES2 key, RFC 7292 MAC
 │   ├── jks.ts           .jks keystores — Sun's legacy Java format
 │   ├── certgen.ts       One form in, one bundle of files out
+│   ├── openssl.ts       The same form, as a script you could have run instead
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe

@@ -183,11 +183,21 @@ function commonName(subject: Dn): string {
   return subject.CN?.trim() ?? "";
 }
 
-/** A file name from the common name: lower case, no separators, never empty. */
+/**
+ * A file name from the common name: lower case, ASCII, never empty.
+ *
+ * Accents are folded rather than dropped, which matters because the alternative
+ * turns `Chứng thư gốc` into `ch-ng-th-g-c`. Decomposing and removing the
+ * combining marks gives `chung-thu-goc`. Vietnamese `đ` has no decomposition,
+ * so it is mapped by hand.
+ */
 export function fileBaseFor(subject: Dn, mode: Mode): string {
   const cn = commonName(subject)
     .toLowerCase()
     .replace(/^\*\./, "wildcard.")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return cn || (mode === "ca" ? "ca" : "certificate");

@@ -275,6 +275,25 @@ const PANES = [
     </div>
   </section>
 
+  <section class="card" id="card-openssl">
+    <div class="io__head">
+      <h2 class="io__label">The same thing, as OpenSSL</h2>
+      <span class="io__meta">updates as you fill the form</span>
+      <button type="button" class="btn btn--tiny" id="copy-script">
+        <Icon paths={ICONS.copy} size={13} strokeWidth={1.9} />
+        <span data-label>Copy script</span>
+      </button>
+    </div>
+
+    <div class="steps" id="steps"></div>
+
+    <p class="field__hint" style="margin-top:0.9rem">
+      Run these instead of using this page whenever the CA key matters &mdash; a key worth
+      protecting should not be pasted into a browser, whatever the browser promises. The commands
+      produce the same certificate the button below does; that claim is checked by running them.
+    </p>
+  </section>
+
   <div class="output__actions" style="justify-content:flex-start">
     <button type="button" class="btn btn--primary" id="generate">
       <Icon paths={ICONS.refresh} size={16} strokeWidth={2} />
@@ -454,6 +473,7 @@ const PANES = [
   } from "../../lib/certgen";
   import { KEY_ALGOS, isEncryptedKeyPem, keyAlgoById, type HashName } from "../../lib/keys";
   import { bytesToPemText } from "../../lib/pem";
+  import { GIT_BASH_NOTE, opensslSteps, stepsToScript, type CommandStep } from "../../lib/openssl";
   import {
     DN_FIELDS,
     KEY_USAGE_LABELS,
@@ -482,6 +502,7 @@ const PANES = [
   const caPassphrase = el<HTMLInputElement>("#ca-passphrase");
   const isCaBox = el<HTMLInputElement>("#is-ca");
   const filePicker = el<HTMLInputElement>("#file-picker");
+  const stepsBox = el<HTMLElement>("#steps");
   const generateButton = el<HTMLButtonElement>("#generate");
   const busy = el<HTMLElement>("#busy");
   const errorBox = el<HTMLElement>("#error");
@@ -652,6 +673,78 @@ const PANES = [
     }
   }
 
+  /**
+   * The form as `GenerateInput`, tolerating what `currentInput` refuses.
+   *
+   * The command panel repaints on every keystroke, so it cannot throw on a
+   * half-typed subject alternative name the way the Generate path does — the
+   * SAN list simply drops what does not parse yet, and the error is already
+   * reported next to the field.
+   */
+  function draftInput(): GenerateInput {
+    let sans: ReturnType<typeof parseSans> = [];
+    if (!makingCa()) {
+      for (const line of sansInput.value.split(/[\n,;]+/)) {
+        try {
+          sans = sans.concat(parseSans(line));
+        } catch {
+          // Still being typed.
+        }
+      }
+    }
+    return { ...currentInputBase(), sans };
+  }
+
+  /** Repaints the OpenSSL panel. Cheap enough to run on every keystroke. */
+  function syncScript(): void {
+    let steps: CommandStep[];
+    try {
+      steps = opensslSteps(draftInput(), {
+        alias: mode() === "csr" ? undefined : ksAlias.value.trim() || undefined,
+        caFromSession: mode() === "signed" && issuerKind() === "session",
+      });
+    } catch {
+      stepsBox.replaceChildren();
+      return;
+    }
+
+    stepsBox.replaceChildren(
+      ...steps.map((step) => {
+        const item = document.createElement("div");
+        item.className = "step";
+
+        const title = document.createElement("span");
+        title.className = "step__title";
+        title.textContent = step.title;
+        item.append(title);
+
+        if (step.note) {
+          const note = document.createElement("p");
+          note.className = "step__note";
+          // The notes carry `code` spans in backticks, which is the only markup
+          // they have; building the nodes keeps it out of innerHTML.
+          for (const [index, piece] of step.note.split("`").entries()) {
+            if (piece.length === 0) continue;
+            if (index % 2 === 1) {
+              const code = document.createElement("code");
+              code.textContent = piece;
+              note.append(code);
+            } else {
+              note.append(document.createTextNode(piece));
+            }
+          }
+          item.append(note);
+        }
+
+        const pre = document.createElement("pre");
+        pre.className = "step__command";
+        pre.textContent = step.command;
+        item.append(pre);
+        return item;
+      }),
+    );
+  }
+
   function syncDays(): void {
     const days = readNumber(daysInput, DEFAULT_DAYS[mode()]);
     const until = new Date(Date.now() + days * 86_400_000);
@@ -666,11 +759,12 @@ const PANES = [
     results.hidden = true;
   }
 
-  function currentInput(): GenerateInput {
+  /** Everything the form says except the names, which parse differently per caller. */
+  function currentInputBase(): GenerateInput {
     return {
       mode: mode(),
       subject: subject(),
-      sans: makingCa() ? [] : parseSans(sansInput.value),
+      sans: [],
       purposes: makingCa() ? [] : purposes(),
       keyAlgoId: algoSelect.value,
       hash: hashSelect.value as HashName,
@@ -688,6 +782,10 @@ const PANES = [
           : { kind: "session" },
       sessionCa,
     };
+  }
+
+  function currentInput(): GenerateInput {
+    return { ...currentInputBase(), sans: makingCa() ? [] : parseSans(sansInput.value) };
   }
 
   async function run(): Promise<void> {
@@ -784,7 +882,10 @@ const PANES = [
       });
     }
 
-    if (ksAlias.value.trim().length === 0) ksAlias.value = made.fileBase.split(".")[0] ?? "server";
+    if (ksAlias.value.trim().length === 0) {
+      ksAlias.value = made.fileBase.split(".")[0] ?? "server";
+      syncScript();
+    }
   }
 
   /* ------------------------------------------------------------- downloads */
@@ -875,6 +976,20 @@ const PANES = [
     }
   }
 
+  attachCopy(el<HTMLButtonElement>("#copy-script"), () => {
+    try {
+      const steps = opensslSteps(draftInput(), {
+        alias: mode() === "csr" ? undefined : ksAlias.value.trim() || undefined,
+        caFromSession: mode() === "signed" && issuerKind() === "session",
+      });
+      return `# ${GIT_BASH_NOTE.replace(/`/g, "")}
+
+${stepsToScript(steps)}`;
+    } catch {
+      return "";
+    }
+  });
+
   el<HTMLButtonElement>("#download-p12").addEventListener("click", () => void exportKeystore("p12"));
   el<HTMLButtonElement>("#download-jks").addEventListener("click", () => void exportKeystore("jks"));
 
@@ -891,6 +1006,7 @@ const PANES = [
     syncMode();
     syncIssuer();
     syncDays();
+    syncScript();
     cnInput.value = "";
     cnInput.focus();
     cnInput.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -941,23 +1057,52 @@ const PANES = [
       daysInput.value = String(DEFAULT_DAYS[mode()]);
       syncMode();
       syncDays();
+      syncScript();
     });
   }
-  for (const radio of issuerRadios) radio.addEventListener("change", syncIssuer);
-  for (const box of all<HTMLInputElement>("[data-purpose]")) box.addEventListener("change", syncUsage);
+  for (const radio of issuerRadios) {
+    radio.addEventListener("change", () => {
+      syncIssuer();
+      syncScript();
+    });
+  }
+  for (const box of all<HTMLInputElement>("[data-purpose]")) {
+    box.addEventListener("change", () => {
+      syncUsage();
+      syncScript();
+    });
+  }
 
   algoSelect.addEventListener("change", () => {
     syncAlgo(true);
     syncUsage();
+    syncScript();
   });
-  cnInput.addEventListener("input", syncNames);
-  sansInput.addEventListener("input", syncNames);
-  daysInput.addEventListener("input", syncDays);
+  hashSelect.addEventListener("change", syncScript);
+  pathLenSelect.addEventListener("change", syncScript);
+  ksAlias.addEventListener("input", syncScript);
+  cnInput.addEventListener("input", () => {
+    syncNames();
+    syncScript();
+  });
+  sansInput.addEventListener("input", () => {
+    syncNames();
+    syncScript();
+  });
+  daysInput.addEventListener("input", () => {
+    syncDays();
+    syncScript();
+  });
+  // Every other subject field feeds -subj, so each one moves the script too.
+  for (const field of all<HTMLInputElement>("[data-dn]")) {
+    field.addEventListener("input", syncScript);
+  }
   caCert.addEventListener("input", syncCaCert);
   caKey.addEventListener("input", syncCaKey);
   isCaBox.addEventListener("change", () => {
     syncMode();
     syncUsage();
+    syncScript();
   });
   attachFileLoader();
 
@@ -965,6 +1110,7 @@ const PANES = [
     button.addEventListener("click", () => {
       daysInput.value = button.dataset["days"]!;
       syncDays();
+      syncScript();
     });
   }
 
@@ -978,4 +1124,5 @@ const PANES = [
   syncUsage();
   syncNames();
   syncDays();
+  syncScript();
 </script>

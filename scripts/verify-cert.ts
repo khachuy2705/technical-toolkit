@@ -54,10 +54,12 @@ import {
   buildJavaKeystore,
   buildP12,
   bundleIsCa,
+  fileBaseFor,
   generate,
   toSessionCa,
   type GenerateInput,
 } from "../src/lib/certgen";
+import { opensslSteps, stepsToScript } from "../src/lib/openssl";
 import { buildJks } from "../src/lib/jks";
 
 type Check = (name: string, condition: boolean, detail?: string) => void;
@@ -77,6 +79,12 @@ function openssl(args: string[], input?: Buffer): string | null {
 }
 
 const OPENSSL_AVAILABLE = openssl(["version"]) !== null;
+
+/** A POSIX shell to run the generated script with. Absent on a bare Windows box. */
+function shellAvailable(): boolean {
+  const run = spawnSync("sh", ["-c", "exit 0"], { encoding: "utf8" });
+  return !run.error && run.status === 0;
+}
 
 const BASE_INPUT: GenerateInput = {
   mode: "signed",
@@ -483,7 +491,7 @@ export async function runCertificateChecks(check: Check): Promise<void> {
         const wrong = openssl(["pkcs12", "-in", file, "-info", "-nodes", "-passin", "pass:wrong"]);
         check("a wrong password is refused", wrong === null);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        discard(dir);
       }
     }
 
@@ -498,7 +506,7 @@ export async function runCertificateChecks(check: Check): Promise<void> {
         const info = openssl(["pkcs12", "-in", file, "-info", "-nodes", "-passin", `pass:${password}`]);
         check("an EC keystore opens too", info !== null && info.includes("BEGIN PRIVATE KEY"));
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        discard(dir);
       }
     }
   }
@@ -658,7 +666,7 @@ export async function runCertificateChecks(check: Check): Promise<void> {
         ]);
         check("OpenSSL validates the three-tier path", verified !== null && verified.includes("OK"), verified ?? "refused");
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        discard(dir);
       }
     }
 
@@ -818,13 +826,320 @@ export async function runCertificateChecks(check: Check): Promise<void> {
           new X509Certificate(signed.certificatePem!).verify(new X509Certificate(bundle.certificatePem!).publicKey),
         );
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        discard(dir);
+      }
+    }
+  }
+
+
+  console.log("\n-- the OpenSSL script the page shows --");
+  {
+    // These checks run the script. A printed command that does not execute, or
+    // executes into a different certificate from the one the page builds, is
+    // worse than showing nothing — so the assertion is not "the text looks
+    // right" but "sh ran it, and the result matches".
+    const SHELL = shellAvailable();
+    if (!SHELL || !OPENSSL_AVAILABLE) {
+      console.log("  note: sh or openssl is missing — the script was not executed.");
+    }
+
+    const cases: { name: string; input: GenerateInput; alias?: string }[] = [
+      {
+        name: "root CA",
+        input: {
+          ...BASE_INPUT,
+          mode: "ca",
+          subject: { CN: "Script Root", O: "Toolkit", C: "VN" },
+          sans: [],
+          purposes: [],
+          keyAlgoId: "rsa-2048",
+          days: 3650,
+          pathLength: 1,
+        },
+      },
+      {
+        name: "EC root CA with no path limit",
+        input: {
+          ...BASE_INPUT,
+          mode: "ca",
+          subject: { CN: "Script EC Root" },
+          sans: [],
+          purposes: [],
+          keyAlgoId: "ec-p384",
+          hash: "SHA-384",
+          days: 365,
+          pathLength: null,
+        },
+      },
+      {
+        name: "TLS server certificate",
+        input: {
+          ...BASE_INPUT,
+          keyAlgoId: "rsa-2048",
+          subject: { CN: "script.example.com", O: "Example Ltd", C: "VN" },
+          sans: parseSans("script.example.com, www.script.example.com, 10.0.0.7, 2001:db8::5"),
+          purposes: ["tls-server", "tls-client"],
+          days: 825,
+        },
+        alias: "server",
+      },
+      {
+        name: "an intermediate CA",
+        input: {
+          ...BASE_INPUT,
+          keyAlgoId: "ec-p256",
+          subject: { CN: "Script Issuing CA" },
+          sans: [],
+          purposes: [],
+          isCa: true,
+          pathLength: 0,
+          days: 1825,
+        },
+      },
+      {
+        name: "a document-signing certificate",
+        input: {
+          ...BASE_INPUT,
+          keyAlgoId: "rsa-2048",
+          subject: { CN: "Nguyen Van A", O: "Công ty ABC", C: "VN" },
+          sans: parseSans("a@example.com"),
+          purposes: ["document-signing", "email"],
+          days: 398,
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const steps = opensslSteps(testCase.input, { alias: testCase.alias });
+      const script = stepsToScript(steps);
+
+      // Cheap structural checks that hold with or without a shell.
+      check(`${testCase.name}: starts by making a key`, steps[0]!.command.includes("openssl genpkey"));
+      check(`${testCase.name}: every step has a title`, steps.every((s) => s.title.length > 0));
+      if (testCase.alias) {
+        const keystore = steps.find((step) => step.title.includes("Keystores"))?.command ?? "";
+        check(`${testCase.name}: exports a .p12 under the alias`, keystore.includes(`-name '${testCase.alias}'`), keystore);
+        check(`${testCase.name}: converts it to a JKS`, keystore.includes("keytool -importkeystore"), keystore);
+      }
+      check(
+        `${testCase.name}: no passphrase is ever put on a command line`,
+        !/-pass(in|out)\s/.test(script),
+        script.slice(0, 200),
+      );
+
+      if (!SHELL || !OPENSSL_AVAILABLE) continue;
+
+      const dir = mkdtempSync(join(tmpdir(), "tt-script-"));
+      try {
+        // Signing needs a CA on disk; the script expects ca.crt and ca.key.
+        let issuerPem = "";
+        if (testCase.input.mode === "signed") {
+          const ca = await generate({
+            ...BASE_INPUT,
+            mode: "ca",
+            subject: { CN: "Script Signing Root" },
+            sans: [],
+            purposes: [],
+            keyAlgoId: "rsa-2048",
+            days: 3650,
+            pathLength: 1,
+          });
+          issuerPem = ca.certificatePem!;
+          writeFileSync(join(dir, "ca.crt"), ca.certificatePem!);
+          writeFileSync(join(dir, "ca.key"), ca.privateKeyPem);
+        }
+
+        // The keystore step is left out of the run: `keytool` needs a JDK, and
+        // `pkcs12 -export` prompts for a password that the displayed command
+        // deliberately does not carry. Its text is asserted separately below.
+        const runnable = steps.filter((step) => !step.title.includes("Keystores"));
+        writeFileSync(join(dir, "run.sh"), stepsToScript(runnable));
+        const run = runScript(dir);
+        check(`${testCase.name}: the script runs clean`, run.ok, run.output);
+        if (!run.ok) continue;
+
+        // And the certificate it produced is the one the page would have made.
+        const base = fileBaseFor(testCase.input.subject, testCase.input.mode);
+        const fromScript = join(dir, `${base}.crt`);
+
+        const page = await generate(
+          testCase.input.mode === "signed"
+            ? {
+                ...testCase.input,
+                issuer: {
+                  kind: "upload",
+                  certPem: issuerPem,
+                  keyPem: readFileSync(join(dir, "ca.key"), "utf8"),
+                },
+              }
+            : testCase.input,
+        );
+        const pageFile = join(dir, "page.crt");
+        writeFileSync(pageFile, page.certificatePem!);
+
+        const shape = (file: string) =>
+          (openssl([
+            "x509", "-in", file, "-noout", "-subject", "-issuer",
+            "-ext", "basicConstraints,keyUsage,extendedKeyUsage,subjectAltName",
+          ]) ?? "")
+            .replace(/\r/g, "")
+            .trim();
+
+        const scripted = shape(fromScript);
+        const built = shape(pageFile);
+        check(
+          `${testCase.name}: the script's certificate matches the page's`,
+          scripted === built && scripted.length > 0,
+          `script:\n${scripted}\n--- page:\n${built}`,
+        );
+
+        // The chain the script assembles must validate, same as the page's.
+        if (testCase.input.mode === "signed") {
+          const verified = openssl(["verify", "-CAfile", join(dir, "ca.crt"), fromScript]);
+          check(`${testCase.name}: OpenSSL validates what the script signed`, verified !== null, "refused");
+          check(
+            `${testCase.name}: the fullchain holds two certificates`,
+            (readFileSync(join(dir, `${base}.fullchain.pem`), "utf8").match(/BEGIN CERTIFICATE/g) ?? []).length === 2,
+          );
+        }
+
+        if (testCase.alias) {
+          // The shown command lets OpenSSL prompt, which is right for a person
+          // and impossible for a test: OpenSSL reads the prompt from the tty,
+          // not stdin, so there is nothing to feed it. The test adds -passout,
+          // which is exactly the flag the displayed command must never carry.
+          const exported = spawnSync(
+            "sh",
+            ["-c", `openssl pkcs12 -export -inkey ${base}.key -in ${base}.crt -certfile ca.crt -name ${testCase.alias} -out ${base}.p12 -passout pass:changeit`],
+            {
+              cwd: dir,
+              encoding: "utf8",
+              input: "changeit\nchangeit\n",
+              env: { ...process.env, MSYS_NO_PATHCONV: "1" },
+            },
+          );
+          check(`${testCase.name}: the export command writes a .p12`, exported.status === 0, `${exported.stdout}${exported.stderr}`.slice(0, 300));
+          if (exported.status === 0) {
+            const info = openssl(["pkcs12", "-in", join(dir, `${base}.p12`), "-info", "-nokeys", "-passin", "pass:changeit"]);
+            check(`${testCase.name}: and OpenSSL reads it back`, info !== null && info.includes("BEGIN CERTIFICATE"), "refused");
+          }
+        }
+      } finally {
+        discard(dir);
+      }
+    }
+
+    // A CSR script is its own path: nothing signs it, so `req -verify` is the
+    // only thing that can check it.
+    if (SHELL && OPENSSL_AVAILABLE) {
+      const csrInput: GenerateInput = {
+        ...BASE_INPUT,
+        mode: "csr",
+        keyAlgoId: "rsa-2048",
+        subject: { CN: "script-csr.example.com", O: "Example Ltd" },
+        sans: parseSans("script-csr.example.com, alt.example.com"),
+        purposes: ["tls-server"],
+      };
+      const dir = mkdtempSync(join(tmpdir(), "tt-csr-"));
+      try {
+        writeFileSync(join(dir, "run.sh"), stepsToScript(opensslSteps(csrInput)));
+        const run = runScript(dir);
+        check("CSR script: runs clean", run.ok, run.output);
+        if (run.ok) {
+          const base = fileBaseFor(csrInput.subject, "csr");
+          const text = openssl(["req", "-in", join(dir, `${base}.csr`), "-noout", "-text", "-verify"]) ?? "";
+          check("CSR script: the request carries its SANs", text.includes("DNS:alt.example.com"), text.slice(0, 400));
+          check("CSR script: and its requested EKU", text.includes("TLS Web Server Authentication"));
+        }
+      } finally {
+        discard(dir);
+      }
+    }
+
+    // File names: a Vietnamese common name must fold to something usable rather
+    // than collapse into a row of hyphens.
+    {
+      const name = (cn: string) => fileBaseFor({ CN: cn }, "ca");
+      check("folds Vietnamese accents", name("Chứng thư gốc") === "chung-thu-goc", name("Chứng thư gốc"));
+      check("maps đ by hand", name("Công ty Đông Á") === "cong-ty-dong-a", name("Công ty Đông Á"));
+      check("keeps a host name as it is", name("www.example.com") === "www.example.com");
+      check("names a wildcard readably", name("*.example.com") === "wildcard.example.com");
+      check("falls back when nothing survives", name("中文") === "ca", name("中文"));
+    }
+
+    // Quoting is the part a script gets wrong silently. A DN holding the
+    // characters OpenSSL's -subj parser treats as structure must survive.
+    {
+      const awkward: GenerateInput = {
+        ...BASE_INPUT,
+        mode: "ca",
+        subject: { CN: "A/B Ltd. (test)", O: "O'Brien + Sons", C: "VN" },
+        sans: [],
+        purposes: [],
+        keyAlgoId: "ec-p256",
+        days: 30,
+      };
+      const steps = opensslSteps(awkward);
+      check("awkward DN: the slash is escaped", steps[1]!.command.includes("A\\/B"), steps[1]!.command);
+      check("awkward DN: the plus is escaped", steps[1]!.command.includes("\\+"), steps[1]!.command);
+      check("awkward DN: the apostrophe is requoted", steps[1]!.command.includes(`'\\''`), steps[1]!.command);
+
+      if (SHELL && OPENSSL_AVAILABLE) {
+        const dir = mkdtempSync(join(tmpdir(), "tt-quote-"));
+        try {
+          writeFileSync(join(dir, "run.sh"), stepsToScript(steps));
+          const run = runScript(dir);
+          check("awkward DN: the script still runs", run.ok, run.output);
+          if (run.ok) {
+            const made = new X509Certificate(readFileSync(join(dir, `${fileBaseFor(awkward.subject, "ca")}.crt`), "utf8"));
+            const page = new X509Certificate((await generate(awkward)).certificatePem!);
+            check("awkward DN: subject survives intact", made.subject === page.subject, `${made.subject} vs ${page.subject}`);
+          }
+        } finally {
+          discard(dir);
+        }
       }
     }
   }
 
   if (!OPENSSL_AVAILABLE) {
     console.log("\n  note: openssl is not on PATH — the OpenSSL cross-checks were skipped.");
+  }
+}
+
+/**
+ * Runs the generated script in `dir`.
+ *
+ * `MSYS_NO_PATHCONV` is set because this machine's shell is Git Bash, whose
+ * MSYS layer rewrites an argument starting with `/` into a Windows path — so
+ * `-subj '/CN=x'` arrives as `C:/Program Files/Git/CN=x`. The script is correct
+ * POSIX and runs unmodified on Linux, macOS and WSL; the variable makes this
+ * shell behave like those rather than papering over a fault in the script.
+ * openssl's key-generation progress dots are dropped so a real error is legible.
+ */
+function runScript(dir: string): { ok: boolean; output: string } {
+  const run = spawnSync("sh", ["run.sh"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, MSYS_NO_PATHCONV: "1" },
+  });
+  const output = `${run.stdout}${run.stderr}`
+    .replace(/[.+*]{8,}/g, " ")
+    .replace(/\s*\n\s*/g, " ")
+    .trim()
+    .slice(0, 400);
+  return { ok: !run.error && run.status === 0, output };
+}
+
+/**
+ * Removes a temporary directory, tolerating a file Windows still has open —
+ * a failed cleanup must not take the whole verification run down with it.
+ */
+function discard(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // The OS will clear it eventually; it is under the temp directory.
   }
 }
 
