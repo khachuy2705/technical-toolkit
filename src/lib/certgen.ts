@@ -80,7 +80,13 @@ export const VALIDITY_PRESETS = [
 /** Where the issuing key comes from in `signed` mode. */
 export type IssuerSource =
   | { readonly kind: "session" }
-  | { readonly kind: "upload"; readonly certPem: string; readonly keyPem: string };
+  | {
+      readonly kind: "upload";
+      readonly certPem: string;
+      readonly keyPem: string;
+      /** Only needed when the pasted key is itself encrypted. */
+      readonly passphrase?: string;
+    };
 
 export interface GenerateInput {
   readonly mode: Mode;
@@ -90,7 +96,13 @@ export interface GenerateInput {
   readonly keyAlgoId: string;
   readonly hash: HashName;
   readonly days: number;
-  /** `null` for no limit; ignored outside CA mode. */
+  /**
+   * Makes the result a CA in its own right. Implied in `ca` mode; in `signed`
+   * mode it produces an intermediate, and in `csr` mode it asks the receiving
+   * CA for one.
+   */
+  readonly isCa?: boolean;
+  /** `null` for no limit. Only read when the result is a CA. */
   readonly pathLength: number | null;
   readonly issuer?: IssuerSource;
   /** The CA made earlier in this session, when `issuer` is `session`. */
@@ -105,13 +117,20 @@ export interface GenerateInput {
  */
 export interface SessionCa {
   readonly name: string;
-  readonly der: Uint8Array;
+  /**
+   * This CA and every issuer above it, leaf-first. An intermediate made here
+   * carries its own root, so a certificate signed by it comes out with the
+   * whole chain rather than a link that resolves nowhere.
+   */
+  readonly chain: readonly Uint8Array[];
   readonly pem: string;
   readonly key: GeneratedKey;
   readonly hash: HashName;
   readonly subjectDer: Uint8Array;
   readonly keyId: Uint8Array;
   readonly notAfter: Date;
+  /** How many CAs this one may still have beneath it; `null` for no limit. */
+  readonly pathLength: number | null;
 }
 
 export interface Summary {
@@ -244,12 +263,18 @@ async function assertKeyMatchesCertificate(
 async function resolveIssuer(
   input: GenerateInput,
   hash: HashName,
+  makingCa: boolean,
 ): Promise<{ issuer: Issuer; chain: Uint8Array[]; description: string; notAfter: Date; notes: string[] }> {
   const source = input.issuer ?? { kind: "session" as const };
   const notes: string[] = [];
 
   if (source.kind === "session") {
     const ca = input.sessionCa!;
+    if (makingCa && ca.pathLength === 0) {
+      notes.push(
+        `${ca.name} has pathlen:0, so a CA signed by it cannot issue anything. Clients that check will reject the chain.`,
+      );
+    }
     return {
       issuer: {
         nameDer: ca.subjectDer,
@@ -258,7 +283,7 @@ async function resolveIssuer(
         hash: ca.hash,
         keyId: ca.keyId,
       },
-      chain: [ca.der],
+      chain: [...ca.chain],
       description: ca.name,
       notAfter: ca.notAfter,
       notes,
@@ -275,11 +300,13 @@ async function resolveIssuer(
       "The uploaded CA's key usage does not include Certificate Sign. Some verifiers will refuse the chain.",
     );
   }
-  if (cert.pathLength === 0 && input.pathLength !== null) {
-    notes.push("That CA has pathLenConstraint 0, so it may not issue a certificate that is itself a CA.");
+  if (makingCa && cert.pathLength === 0) {
+    notes.push(
+      "That CA has pathlen:0, which forbids it from issuing a certificate that is itself a CA. Clients that check will reject the chain.",
+    );
   }
 
-  const key = await importPrivateKeyPem(source.keyPem, hash);
+  const key = await importPrivateKeyPem(source.keyPem, hash, source.passphrase ?? "");
   await assertKeyMatchesCertificate(cert, key.privateKey, key.algo, hash);
 
   // A pasted fullchain is welcome: the first block issues, the rest ride along.
@@ -331,7 +358,7 @@ export async function generate(input: GenerateInput): Promise<Bundle> {
   const { notBefore, notAfter } = validityWindow(input.days);
   const notes: string[] = [];
 
-  const isCa = input.mode === "ca";
+  const isCa = input.mode === "ca" || input.isCa === true;
   const spec: CertificateSpec = {
     subject: input.subject,
     sans: input.sans,
@@ -394,7 +421,10 @@ export async function generate(input: GenerateInput): Promise<Bundle> {
   let chain: Uint8Array[];
   let issuerName: string;
 
-  if (isCa) {
+  // Who signs is decided by the mode, not by whether a CA is being made: only
+  // a root signs itself. An intermediate is a CA *and* is signed by someone
+  // else, which is the whole point of it.
+  if (input.mode === "ca") {
     // A root signs itself, so the issuer is the subject and the key is its own.
     issuer = {
       nameDer: encodeDn(input.subject),
@@ -406,7 +436,7 @@ export async function generate(input: GenerateInput): Promise<Bundle> {
     chain = [];
     issuerName = "itself (self-signed)";
   } else {
-    const resolved = await resolveIssuer(input, input.hash);
+    const resolved = await resolveIssuer(input, input.hash, isCa);
     issuer = resolved.issuer;
     chain = resolved.chain;
     issuerName = resolved.description;
@@ -452,7 +482,7 @@ export async function generate(input: GenerateInput): Promise<Bundle> {
     },
     {
       label: "Extended key usage",
-      value: isCa ? "none — a root CA is not restricted" : usage.ekuLabels.join(", ") || "—",
+      value: isCa ? "none — a CA is left unrestricted" : usage.ekuLabels.join(", ") || "—",
       wide: true,
     },
     {
@@ -493,18 +523,30 @@ function describeSan(san: San): string {
 
 /** Turns a finished bundle into a CA the next certificate can be signed by. */
 export async function toSessionCa(input: GenerateInput, bundle: Bundle): Promise<SessionCa> {
-  const der = bundle.keystore!.chain[0]!;
   const parsed = parseCertificate(bundle.certificatePem!);
   return {
     name: parsed.subject,
-    der,
+    // The bundle's keystore chain is already this certificate followed by its
+    // issuers, which is exactly what the next certificate down needs.
+    chain: bundle.keystore!.chain,
     pem: bundle.certificatePem!,
     key: bundle.key,
     hash: input.hash,
     subjectDer: parsed.subjectDer,
     keyId: parsed.subjectKeyId ?? (await keyIdentifier(parsed.spki)),
     notAfter: parsed.notAfter,
+    pathLength: parsed.pathLength,
   };
+}
+
+/** Whether a finished bundle is a CA, and so can go on to sign. */
+export function bundleIsCa(bundle: Bundle): boolean {
+  if (!bundle.certificatePem) return false;
+  try {
+    return parseCertificate(bundle.certificatePem).isCa;
+  } catch {
+    return false;
+  }
 }
 
 export interface KeystoreOptions {

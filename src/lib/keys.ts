@@ -17,10 +17,12 @@ import {
   oid,
   readChildren,
   readDer,
+  readInteger,
   readOid,
   sequence,
   type DerNode,
 } from "./asn1";
+import { md5 } from "./md5";
 import { findPem } from "./pem";
 
 export const OID = {
@@ -278,13 +280,217 @@ function sec1ToPkcs8(sec1: Uint8Array): Uint8Array {
   );
 }
 
+/* ------------------------------------------------ decrypting a private key */
+
+const KEY_LABELS = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "ENCRYPTED PRIVATE KEY"];
+
+const PBE = {
+  pbes2: "1.2.840.113549.1.5.13",
+  pbkdf2: "1.2.840.113549.1.5.12",
+  hmacSha1: "1.2.840.113549.2.7",
+  hmacSha224: "1.2.840.113549.2.8",
+  hmacSha256: "1.2.840.113549.2.9",
+  hmacSha384: "1.2.840.113549.2.10",
+  hmacSha512: "1.2.840.113549.2.11",
+  aes128Cbc: "2.16.840.1.101.3.4.1.2",
+  aes192Cbc: "2.16.840.1.101.3.4.1.22",
+  aes256Cbc: "2.16.840.1.101.3.4.1.42",
+} as const;
+
+/** Names for the PBE schemes that exist but cannot be undone in a browser. */
+const LEGACY_PBE: Record<string, string> = {
+  "1.2.840.113549.1.5.3": "PBE-MD5-DES",
+  "1.2.840.113549.1.5.6": "PBE-MD5-RC2",
+  "1.2.840.113549.1.5.10": "PBE-SHA1-DES",
+  "1.2.840.113549.1.5.11": "PBE-SHA1-RC2",
+  "1.2.840.113549.1.12.1.3": "PBE-SHA1-3DES",
+  "1.2.840.113549.1.12.1.6": "PBE-SHA1-RC2-40",
+};
+
+const AES_KEY_BYTES: Record<string, number> = {
+  [PBE.aes128Cbc]: 16,
+  [PBE.aes192Cbc]: 24,
+  [PBE.aes256Cbc]: 32,
+};
+
+const PRF_HASH: Record<string, HashName | "SHA-1"> = {
+  [PBE.hmacSha1]: "SHA-1",
+  [PBE.hmacSha256]: "SHA-256",
+  [PBE.hmacSha384]: "SHA-384",
+  [PBE.hmacSha512]: "SHA-512",
+};
+
+const NO_PASSPHRASE = "That key is encrypted. Enter its passphrase to use it.";
+const WRONG_PASSPHRASE = "That passphrase does not open the key.";
+
+async function pbkdf2Key(
+  passphrase: string,
+  salt: Uint8Array,
+  iterations: number,
+  hash: string,
+  bytes: number,
+): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: salt.slice().buffer, iterations, hash },
+    base,
+    { name: "AES-CBC", length: bytes * 8 },
+    false,
+    ["decrypt"],
+  );
+}
+
+/**
+ * Undoes PBES2 over an `ENCRYPTED PRIVATE KEY`, which is what OpenSSL 1.1 and
+ * later write by default: PBKDF2 into AES-CBC, both of which WebCrypto does.
+ *
+ * The older schemes in `LEGACY_PBE` cannot be undone here at all — they need
+ * DES, 3DES or RC2, and WebCrypto implements none of the three. Those are named
+ * in the error rather than reported as a wrong passphrase, because the two
+ * failures need completely different things from the user.
+ */
+async function decryptPkcs8(encrypted: Uint8Array, passphrase: string): Promise<Uint8Array> {
+  const [algorithmNode, dataNode] = readChildren(readDer(encrypted));
+  const parts = readChildren(algorithmNode!);
+  const scheme = readOid(parts[0]!);
+
+  if (scheme !== PBE.pbes2) {
+    const name = LEGACY_PBE[scheme];
+    throw new Error(
+      name
+        ? `That key is encrypted with ${name}, which uses a cipher browsers do not provide. Convert it first: \`openssl pkcs8 -topk8 -in ca.key -out ca-aes.key\`.`
+        : `Unsupported key encryption (${scheme}).`,
+    );
+  }
+
+  const params = readChildren(parts[1]!);
+  const kdf = readChildren(params[0]!);
+  if (readOid(kdf[0]!) !== PBE.pbkdf2) throw new Error("That key does not use PBKDF2.");
+
+  const kdfParams = readChildren(kdf[1]!);
+  const salt = kdfParams[0]!.content;
+  const iterations = Number(readInteger(kdfParams[1]!));
+
+  // keyLength and prf are both optional and both may be absent; they are told
+  // apart by tag, an INTEGER against a SEQUENCE, not by position.
+  const prfNode = kdfParams.slice(2).find((node) => node.tag === 0x30);
+  const prfOid = prfNode ? readOid(readChildren(prfNode)[0]!) : PBE.hmacSha1;
+  const hash = PRF_HASH[prfOid];
+  if (!hash) {
+    throw new Error(
+      prfOid === PBE.hmacSha224
+        ? "That key uses HMAC-SHA-224, which browsers do not provide."
+        : `Unsupported PBKDF2 hash (${prfOid}).`,
+    );
+  }
+
+  const cipher = readChildren(params[1]!);
+  const cipherOid = readOid(cipher[0]!);
+  const keyBytes = AES_KEY_BYTES[cipherOid];
+  if (!keyBytes) {
+    throw new Error(
+      "That key is encrypted with a cipher other than AES-CBC, which browsers do not provide.",
+    );
+  }
+  const iv = cipher[1]!.content;
+
+  const key = await pbkdf2Key(passphrase, salt, iterations, hash, keyBytes);
+  try {
+    return new Uint8Array(
+      await crypto.subtle.decrypt({ name: "AES-CBC", iv: iv.slice().buffer }, key, dataNode!.content.slice().buffer),
+    );
+  } catch {
+    throw new Error(WRONG_PASSPHRASE);
+  }
+}
+
+/**
+ * OpenSSL's `EVP_BytesToKey` with MD5 and one iteration — the key schedule
+ * behind the traditional `Proc-Type: 4,ENCRYPTED` PEM. Weak by design and long
+ * superseded, but it is what `openssl genrsa -aes256` wrote for years, so keys
+ * in this form are still everywhere.
+ */
+function evpBytesToKey(passphrase: string, salt: Uint8Array, bytes: number): Uint8Array {
+  const password = new TextEncoder().encode(passphrase);
+  const out: Uint8Array[] = [];
+  let previous: Uint8Array = new Uint8Array(0);
+  let total = 0;
+  while (total < bytes) {
+    previous = md5(concatBytes(previous, password, salt));
+    out.push(previous);
+    total += previous.length;
+  }
+  return concatBytes(...out).subarray(0, bytes);
+}
+
+function concatBytes(...parts: readonly Uint8Array[]): Uint8Array {
+  let length = 0;
+  for (const part of parts) length += part.length;
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+const DEK_CIPHERS: Record<string, number> = {
+  "AES-128-CBC": 16,
+  "AES-192-CBC": 24,
+  "AES-256-CBC": 32,
+};
+
+/** Undoes a traditional `DEK-Info` encrypted PEM body. */
+async function decryptLegacyPem(
+  body: Uint8Array,
+  dekInfo: string,
+  passphrase: string,
+): Promise<Uint8Array> {
+  const [name, ivHex] = dekInfo.split(",").map((part) => part.trim());
+  const keyBytes = DEK_CIPHERS[(name ?? "").toUpperCase()];
+  if (!keyBytes) {
+    throw new Error(
+      `That key is encrypted with ${name ?? "an unknown cipher"}, which browsers do not provide. Convert it first: \`openssl pkcs8 -topk8 -in ca.key -out ca-aes.key\`.`,
+    );
+  }
+  if (!ivHex || !/^[0-9a-f]+$/i.test(ivHex)) throw new Error("The key's DEK-Info line is malformed.");
+
+  const iv = Uint8Array.from(ivHex.match(/../g)!.map((byte) => Number.parseInt(byte, 16)));
+  // The salt is the first eight bytes of the IV — an OpenSSL convention, not
+  // anything the format states.
+  const raw = evpBytesToKey(passphrase, iv.subarray(0, 8), keyBytes);
+  const key = await crypto.subtle.importKey("raw", raw.slice().buffer, "AES-CBC", false, ["decrypt"]);
+  try {
+    return new Uint8Array(
+      await crypto.subtle.decrypt({ name: "AES-CBC", iv: iv.slice().buffer }, key, body.slice().buffer),
+    );
+  } catch {
+    throw new Error(WRONG_PASSPHRASE);
+  }
+}
+
 export interface ImportedKey {
   readonly algo: KeyAlgo;
   readonly privateKey: CryptoKey;
   readonly pkcs8: Uint8Array;
 }
 
-const KEY_LABELS = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "ENCRYPTED PRIVATE KEY"];
+/** Whether a pasted key needs a passphrase before it can be read. */
+export function isEncryptedKeyPem(text: string): boolean {
+  try {
+    const block = findPem(text, KEY_LABELS);
+    return block.label === "ENCRYPTED PRIVATE KEY" || "DEK-Info" in block.headers;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Imports a private key from whatever PEM the user pasted.
@@ -292,28 +498,52 @@ const KEY_LABELS = ["PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY", "ENCRYPT
  * `hash` matters only for RSA: WebCrypto binds a hash to the key at import
  * time, so a key imported for SHA-256 cannot later sign with SHA-384.
  */
-export async function importPrivateKeyPem(text: string, hash: HashName): Promise<ImportedKey> {
+export async function importPrivateKeyPem(
+  text: string,
+  hash: HashName,
+  passphrase = "",
+): Promise<ImportedKey> {
   const block = findPem(text, KEY_LABELS);
 
+  // Two encrypted forms reach us: PKCS#8's own EncryptedPrivateKeyInfo, and the
+  // traditional PEM whose body is ciphertext under a DEK-Info header. They are
+  // decrypted differently but both land back on the plaintext body below.
+  let body = block.der;
   if (block.label === "ENCRYPTED PRIVATE KEY") {
-    throw new Error(
-      "That key is passphrase-encrypted. Decrypt it first: `openssl pkcs8 -topk8 -nocrypt -in enc.key -out plain.key`.",
-    );
+    if (passphrase.length === 0) throw new Error(NO_PASSPHRASE);
+    body = await decryptPkcs8(block.der, passphrase);
+  } else if (block.headers["DEK-Info"]) {
+    if (passphrase.length === 0) throw new Error(NO_PASSPHRASE);
+    body = await decryptLegacyPem(block.der, block.headers["DEK-Info"], passphrase);
   }
 
   const pkcs8 =
     block.label === "RSA PRIVATE KEY"
-      ? pkcs1ToPkcs8(block.der)
+      ? pkcs1ToPkcs8(body)
       : block.label === "EC PRIVATE KEY"
-        ? sec1ToPkcs8(block.der)
-        : block.der;
+        ? sec1ToPkcs8(body)
+        : body;
 
-  const parts = readChildren(readDer(pkcs8));
-  if (parts.length < 3) throw new Error("That does not look like a private key.");
-  let algo = algoFromAlgorithmId(parts[1]!);
+  // Past this point a failure has two possible causes, and they need different
+  // things from the user: a damaged PEM, or — when the key was encrypted — a
+  // passphrase that decrypted to plausible-looking rubbish. CBC padding catches
+  // most wrong passphrases, but roughly one in 256 gets through and lands here.
+  const decrypted = body !== block.der;
+  const unreadable = (detail: string) =>
+    new Error(decrypted ? WRONG_PASSPHRASE : detail);
 
+  let parts;
+  try {
+    parts = readChildren(readDer(pkcs8));
+  } catch {
+    throw unreadable("That private key's DER structure does not parse.");
+  }
+  if (parts.length < 3) throw unreadable("That does not look like a private key.");
+
+  let algo: KeyAlgo;
   let privateKey: CryptoKey;
   try {
+    algo = algoFromAlgorithmId(parts[1]!);
     privateKey = await crypto.subtle.importKey(
       "pkcs8",
       pkcs8.slice().buffer,
@@ -321,8 +551,10 @@ export async function importPrivateKeyPem(text: string, hash: HashName): Promise
       true,
       ["sign"],
     );
-  } catch {
-    throw new Error("The browser could not read that private key. Check that the PEM is complete.");
+  } catch (error) {
+    // An unsupported curve or algorithm is a real answer, not a bad passphrase.
+    if (!decrypted && error instanceof Error && error.message.startsWith("That key ")) throw error;
+    throw unreadable("The browser could not read that private key. Check that the PEM is complete.");
   }
 
   if (algo.kind === "rsa") {

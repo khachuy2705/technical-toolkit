@@ -28,7 +28,7 @@ One runtime dependency: `js-yaml`, dynamically imported so only the YAML page do
 other tool is written from scratch, including the whole certificate stack — ASN.1/DER, X.509,
 PKCS#10, PKCS#12 and the Java keystore format. A tool page is a few kilobytes of JavaScript; the
 heavy pieces — wordlists, the YAML parser — are separate chunks fetched only when the feature is
-used. The certificate page is the largest at 12.8 KB gzipped, still an order of magnitude below
+used. The certificate page is the largest at 14.1 KB gzipped, still an order of magnitude below
 the libraries it replaces.
 
 ## Commands
@@ -132,7 +132,10 @@ appended digit or symbol in a passphrase is real entropy that the tool does not 
 
 **Certificates are built, not borrowed.** Keys come from `crypto.subtle`; everything wrapped
 around them — DER, X.509, PKCS#10, PKCS#12, JKS — is written here, because there is no browser API
-for it and the alternative was a dependency far larger than the site. The sharp edges are recorded
+for it and the alternative was a dependency far larger than the site. A CA you already have can be
+pasted or loaded from a file, PEM or binary DER, and its key is decrypted in the page when it has
+a passphrase — PBES2 and OpenSSL's traditional `DEK-Info` PEM both open, while DES, 3DES and RC2
+are refused by name because no browser implements them. The sharp edges are recorded
 in [design.md](design.md) §8.6: ECDSA signatures need reshaping from WebCrypto's raw `r || s` into
 DER, an ECDSA certificate must never claim `keyEncipherment`, a root CA must carry no EKU, and a
 .p12 needs two different key derivations because its MAC predates PBKDF2's use here. A CA made on

@@ -96,6 +96,19 @@ const PANES = [
     </p>
   </section>
 
+  <section class="card" id="card-subca">
+    <label class="check">
+      <input type="checkbox" id="is-ca" />
+      <span class="check__text">
+        This certificate is itself a CA (intermediate)
+        <span class="check__sample" style="font-family:var(--font-sans)">
+          It may sign certificates of its own. Sets CA:TRUE and Certificate Sign, and replaces the
+          purposes below &mdash; a CA is left unrestricted so that what it issues is not.
+        </span>
+      </span>
+    </label>
+  </section>
+
   <section class="card" id="card-purpose">
     <h2 class="card__title">What the certificate is for</h2>
     <div class="field__group">
@@ -212,6 +225,7 @@ const PANES = [
           <div class="io__head">
             <label class="io__label" for="ca-cert">CA certificate</label>
             <span class="io__meta" id="ca-cert-meta"></span>
+            <button type="button" class="btn btn--tiny" data-load="ca-cert">Load file</button>
           </div>
           <textarea
             id="ca-cert"
@@ -224,7 +238,8 @@ const PANES = [
         <div class="io__pane">
           <div class="io__head">
             <label class="io__label" for="ca-key">CA private key</label>
-            <span class="io__meta">never leaves the page</span>
+            <span class="io__meta" id="ca-key-meta">never leaves the page</span>
+            <button type="button" class="btn btn--tiny" data-load="ca-key">Load file</button>
           </div>
           <textarea
             id="ca-key"
@@ -235,11 +250,28 @@ const PANES = [
             autocomplete="off"></textarea>
         </div>
       </div>
+      <div class="field" id="field-passphrase" hidden style="margin-top:0.75rem">
+        <label class="field__label" for="ca-passphrase">Key passphrase</label>
+        <input
+          type="password"
+          id="ca-passphrase"
+          class="text-input"
+          placeholder="the passphrase that unlocks the key"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="field__hint">
+          Used once, here, to decrypt the key in memory. It is not stored and not sent anywhere.
+        </p>
+      </div>
+
       <p class="field__hint" style="margin-top:0.5rem">
-        A passphrase-protected key has to be decrypted first:
-        <code>openssl pkcs8 -topk8 -nocrypt -in ca.key -out plain.key</code>. Paste a full chain in
-        the left box and the extra certificates are carried into the output chain.
+        <b>Load file</b> accepts PEM or binary DER (a <code>.crt</code> or <code>.cer</code>).
+        Paste a full chain in the left box and the extra certificates are carried into the output
+        chain. A key encrypted with 3DES or RC2 cannot be opened in a browser &mdash; convert it
+        with <code>openssl pkcs8 -topk8 -in ca.key -out ca-aes.key</code> first.
       </p>
+      <input type="file" id="file-picker" accept=".pem,.crt,.cer,.der,.key,.txt" hidden />
     </div>
   </section>
 
@@ -412,6 +444,7 @@ const PANES = [
     DEFAULT_DAYS,
     buildJavaKeystore,
     buildP12,
+    bundleIsCa,
     generate,
     toSessionCa,
     type Bundle,
@@ -419,7 +452,8 @@ const PANES = [
     type Mode,
     type SessionCa,
   } from "../../lib/certgen";
-  import { KEY_ALGOS, keyAlgoById, type HashName } from "../../lib/keys";
+  import { KEY_ALGOS, isEncryptedKeyPem, keyAlgoById, type HashName } from "../../lib/keys";
+  import { bytesToPemText } from "../../lib/pem";
   import {
     DN_FIELDS,
     KEY_USAGE_LABELS,
@@ -445,6 +479,9 @@ const PANES = [
   const pathLenSelect = el<HTMLSelectElement>("#pathlen");
   const caCert = el<HTMLTextAreaElement>("#ca-cert");
   const caKey = el<HTMLTextAreaElement>("#ca-key");
+  const caPassphrase = el<HTMLInputElement>("#ca-passphrase");
+  const isCaBox = el<HTMLInputElement>("#is-ca");
+  const filePicker = el<HTMLInputElement>("#file-picker");
   const generateButton = el<HTMLButtonElement>("#generate");
   const busy = el<HTMLElement>("#busy");
   const errorBox = el<HTMLElement>("#error");
@@ -473,6 +510,9 @@ const PANES = [
   const mode = (): Mode => (modeRadios.find((r) => r.checked)!.value as Mode);
   const issuerKind = (): "session" | "upload" => issuerRadios.find((r) => r.checked)!.value as "session" | "upload";
 
+  /** True when what is being made is a CA, whether by mode or by the checkbox. */
+  const makingCa = (): boolean => mode() === "ca" || isCaBox.checked;
+
   function subject(): Dn {
     const dn: Dn = {};
     for (const field of DN_FIELDS) {
@@ -495,7 +535,12 @@ const PANES = [
     const current = mode();
     el<HTMLElement>("#mode-blurb").textContent = MODES.find((m) => m.id === current)!.blurb;
 
-    const isCa = current === "ca";
+    // A root is always a CA, so the checkbox only makes sense for the two modes
+    // where being one is a choice.
+    const rootMode = current === "ca";
+    el<HTMLElement>("#card-subca").hidden = rootMode;
+    const isCa = rootMode || isCaBox.checked;
+
     el<HTMLElement>("#card-sans").hidden = isCa;
     el<HTMLElement>("#card-purpose").hidden = isCa;
     el<HTMLElement>("#field-pathlen").hidden = !isCa;
@@ -517,9 +562,29 @@ const PANES = [
   function syncIssuer(): void {
     el<HTMLElement>("#issuer-upload").hidden = issuerKind() !== "upload";
     const label = el<HTMLElement>("#session-ca");
-    label.textContent = sessionCa
-      ? `${sessionCa.name} — expires ${sessionCa.notAfter.toISOString().slice(0, 10)}`
-      : "none yet — switch to Root CA and make one";
+    if (!sessionCa) {
+      label.textContent = "none yet — switch to Root CA and make one";
+      return;
+    }
+    const depth =
+      sessionCa.pathLength === null
+        ? ""
+        : ` · pathlen:${sessionCa.pathLength}`;
+    const links = sessionCa.chain.length > 1 ? ` · chain of ${sessionCa.chain.length}` : "";
+    label.textContent =
+      `${sessionCa.name} — expires ${sessionCa.notAfter.toISOString().slice(0, 10)}${depth}${links}`;
+  }
+
+  /**
+   * Reveals the passphrase field only when the pasted key actually needs one,
+   * so the common case of an unencrypted key shows no box to ignore.
+   */
+  function syncCaKey(): void {
+    const encrypted = isEncryptedKeyPem(caKey.value);
+    el<HTMLElement>("#field-passphrase").hidden = !encrypted;
+    el<HTMLElement>("#ca-key-meta").textContent = encrypted
+      ? "encrypted — passphrase needed"
+      : "never leaves the page";
   }
 
   /**
@@ -605,15 +670,21 @@ const PANES = [
     return {
       mode: mode(),
       subject: subject(),
-      sans: mode() === "ca" ? [] : parseSans(sansInput.value),
-      purposes: mode() === "ca" ? [] : purposes(),
+      sans: makingCa() ? [] : parseSans(sansInput.value),
+      purposes: makingCa() ? [] : purposes(),
       keyAlgoId: algoSelect.value,
       hash: hashSelect.value as HashName,
       days: readNumber(daysInput, DEFAULT_DAYS[mode()]),
+      isCa: mode() !== "ca" && isCaBox.checked,
       pathLength: pathLenSelect.value === "" ? null : Number(pathLenSelect.value),
       issuer:
         issuerKind() === "upload"
-          ? { kind: "upload", certPem: caCert.value, keyPem: caKey.value }
+          ? {
+              kind: "upload",
+              certPem: caCert.value,
+              keyPem: caKey.value,
+              passphrase: caPassphrase.value,
+            }
           : { kind: "session" },
       sessionCa,
     };
@@ -702,8 +773,11 @@ const PANES = [
     el<HTMLElement>("#pane-chain").hidden = made.chainPem === null;
 
     // A freshly made CA is offered as the issuer for the next certificate.
-    el<HTMLElement>("#ca-promote").hidden = made.mode !== "ca";
-    if (made.mode === "ca") {
+    // An intermediate can sign just as a root can, so the offer follows what the
+    // certificate says rather than which mode made it.
+    const madeACa = bundleIsCa(made);
+    el<HTMLElement>("#ca-promote").hidden = !madeACa;
+    if (madeACa) {
       void toSessionCa(input, made).then((ca) => {
         sessionCa = ca;
         syncIssuer();
@@ -723,6 +797,39 @@ const PANES = [
     link.download = name;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Loads a certificate or key file into one of the issuer boxes.
+   *
+   * One hidden `<input type="file">` serves both buttons, retargeted on each
+   * click, because a picker per box is two pickers to keep in step. A binary
+   * DER file is turned into PEM on the way in, so nothing downstream has to
+   * know the difference.
+   */
+  function attachFileLoader(): void {
+    let target: HTMLTextAreaElement | null = null;
+
+    for (const button of all<HTMLButtonElement>("[data-load]")) {
+      button.addEventListener("click", () => {
+        target = el<HTMLTextAreaElement>(`#${button.dataset["load"]}`);
+        filePicker.value = "";
+        filePicker.click();
+      });
+    }
+
+    filePicker.addEventListener("change", async () => {
+      const file = filePicker.files?.[0];
+      if (!file || !target) return;
+      const box = target;
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        box.value = bytesToPemText(bytes, box === caKey ? "PRIVATE KEY" : "CERTIFICATE");
+      } catch {
+        box.value = "";
+      }
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
   }
 
   const EXTENSIONS: Record<string, string> = { key: "key", cert: "crt", chain: "fullchain.pem" };
@@ -778,6 +885,9 @@ const PANES = [
     // has to be applied here too. Without it the leaf inherits the CA's ten
     // years and trips the "outlives its CA" warning on the way out.
     daysInput.value = String(DEFAULT_DAYS.signed);
+    // Signing *with* a CA just made is almost never a request for another CA,
+    // and leaving the box ticked quietly produces a second intermediate.
+    isCaBox.checked = false;
     syncMode();
     syncIssuer();
     syncDays();
@@ -844,6 +954,12 @@ const PANES = [
   sansInput.addEventListener("input", syncNames);
   daysInput.addEventListener("input", syncDays);
   caCert.addEventListener("input", syncCaCert);
+  caKey.addEventListener("input", syncCaKey);
+  isCaBox.addEventListener("change", () => {
+    syncMode();
+    syncUsage();
+  });
+  attachFileLoader();
 
   for (const button of all<HTMLButtonElement>("[data-days]")) {
     button.addEventListener("click", () => {
@@ -857,6 +973,7 @@ const PANES = [
   loadPreferences();
   syncMode();
   syncIssuer();
+  syncCaKey();
   syncAlgo(false);
   syncUsage();
   syncNames();

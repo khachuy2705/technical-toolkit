@@ -669,6 +669,13 @@ One page, three modes, because all three share a CA and a subject form:
 | **Certificate signed by a CA** | the CA made in this tab, or one pasted in | a leaf certificate + key + chain |
 | **Certificate request (CSR)** | its own new key | a PKCS#10 request + key |
 
+The second mode carries a tick box, **this certificate is itself a CA**, which
+turns the result into an intermediate. That is what makes the usual two-tier
+shape reachable — an offline root that signs one intermediate, and an
+intermediate that does the day-to-day issuing — and it is the reason being a CA
+is a property of the certificate here rather than of the mode. A CSR can request
+it too, for an intermediate to be signed by someone else's root.
+
 | Control | Options | Default |
 |---|---|---|
 | Subject | CN, O, OU, L, ST, C, emailAddress | — (CN required) |
@@ -677,7 +684,9 @@ One page, three modes, because all three share a CA and a subject form:
 | Key | RSA 2048/3072/4096, ECDSA P-256/P-384/P-521 | RSA 2048 |
 | Signature hash | SHA-256/384/512, following the key unless overridden | SHA-256 |
 | Validity | days, with 90 / 398 / 825 / 10-year presets | 825 (CA: 3650) |
-| Path length | no limit, 0, 1, 2 — CA mode only | no limit |
+| Path length | no limit, 0, 1, 2 — whenever a CA is being made | no limit |
+| CA private key | pasted, or loaded from a file as PEM or binary DER | — |
+| Key passphrase | asked for only when the pasted key is encrypted | — |
 | Export | PEM (key, certificate, chain), PKCS#12, JKS | — |
 
 - **SAN kinds are inferred from shape**, not chosen from a dropdown: `@` is an address, `://` a
@@ -691,7 +700,14 @@ One page, three modes, because all three share a CA and a subject form:
   page says so, and offers a **Sign a certificate with it** button that switches mode in place.
   Persisting CAs is deliberately not built — see §12.
 - **A pasted CA is read as it is pasted**, showing its subject, whether it is a CA, and its expiry,
-  so a wrong file is obvious before a key is generated against it.
+  so a wrong file is obvious before a key is generated against it. The same for the key: the page
+  detects an encrypted one and only then asks for a passphrase, so the common case shows no box to
+  ignore.
+- **Encrypted CA keys are opened in the page**, which matters because most real CA keys are. Two
+  forms are handled: PKCS#8 `ENCRYPTED PRIVATE KEY` under PBES2, and OpenSSL's traditional
+  `Proc-Type: 4,ENCRYPTED` PEM. The passphrase is used once, in memory, and never stored.
+- **A CA promoted to sign carries its whole chain**, so a certificate under an intermediate comes
+  out with the root behind it rather than a link that resolves nowhere.
 - **The key and certificate are proved to match** before signing, by signing a random probe with
   the pasted key and verifying it with the certificate's public key. Pasting a mismatched pair is
   the most common mistake here and otherwise produces a certificate that fails only in production.
@@ -886,6 +902,21 @@ make obvious cost a bug: the key protector's `AlgorithmIdentifier` must carry an
 parameter. ASN.1 makes it optional and Java itself reads only the OID, so omitting it produces a
 keystore Java opens happily — and that other readers refuse outright. A check now pins it (§9).
 
+**Reading an encrypted key has a hard floor.** PBES2 — PBKDF2 into AES-CBC — is what OpenSSL 1.1
+and later write, and WebCrypto does both halves, so those keys open. OpenSSL's traditional
+`DEK-Info` PEM opens too: its key schedule is `EVP_BytesToKey`, one round of MD5, which `md5.ts`
+already provides. What cannot be opened at all is anything using DES, 3DES or RC2 — `PBE-SHA1-3DES`
+most of all, since that was the default for years. WebCrypto implements none of those ciphers and
+never will, so the page names the scheme and gives the `openssl pkcs8` line that converts it,
+rather than reporting a wrong passphrase. The two failures need different things from the user and
+so must not share a message.
+
+**RFC 1421 headers are parsed, not stripped.** A traditional encrypted PEM carries `Proc-Type` and
+`DEK-Info` above its body. Filtering the body down to base64 characters, which is the obvious way
+to be forgiving about pasted text, keeps the letters in `ProcType` and `ENCRYPTED` and corrupts the
+key silently. The headers are split off on a blank line instead, and only when a blank line
+actually closes them — otherwise base64 containing a colon would be mistaken for a header.
+
 **Nothing is persisted.** A CA made on the page lives in a module variable for the life of the tab.
 Storing private keys in `localStorage` was considered and deferred rather than built: it is a real
 convenience with a real cost, and it deserves its own decision (§12) rather than arriving as a
@@ -896,7 +927,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 612 checks, Node, no browser
+npm run verify   # 650 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -954,6 +985,19 @@ npm run build    # runs check first, then the static build
   belonging to a different CA are all refused with a message; and that a TLS certificate with no
   SANs, no purpose at all, an issuer that is not a CA, and a leaf outliving its CA each produce a
   warning without blocking generation.
+- **Intermediate CAs** — a root signs an intermediate, the intermediate signs a leaf, and
+  **OpenSSL validates the whole three-tier path** with `verify -untrusted`. The intermediate is
+  checked for `CA:TRUE`, its `pathlen`, the absence of an EKU, and that it is signed by the root
+  rather than by itself — which is exactly what broke when being a CA stopped implying being
+  self-signed, and what the check now pins.
+- **Encrypted keys** — keys written by **OpenSSL itself** in four forms (PBES2 with AES-256 and
+  SHA-256, with AES-128 and the SHA-1 PRF, at OpenSSL's own default, and the traditional
+  `DEK-Info` PEM) are opened and compared byte for byte against the PKCS#8 that went in; an EC key
+  takes the same path; a `PBE-SHA1-3DES` key is asserted to be refused *by name* with the
+  conversion command; a missing and a wrong passphrase are each refused with their own message;
+  and a certificate is signed end to end with an encrypted CA key.
+- **PEM headers** — that a `Proc-Type`/`DEK-Info` block's body survives intact, that the headers
+  are read, and that ordinary base64 is never mistaken for a header.
 - **JKS** — magic, version, entry layout, the lower-cased alias, the trailing
   `SHA-1(password || "Mighty Aphrodite" || body)` digest recomputed independently, the key
   protector undone back to the original PKCS#8, and the explicit NULL parameter that §8.6
@@ -1014,7 +1058,10 @@ leaf, both keystores downloaded through Chrome's own download path, and the down
 opened by **OpenSSL** (.p12) and **pyjks** (.jks) outside the browser. `openssl verify` accepts the
 chain the page produced. That run caught three things a build cannot: `[hidden]` being defeated by
 `.field { display: flex }`, the saved signature hash being overwritten on load, and a leaf
-inheriting its CA's ten-year validity when promoted.
+inheriting its CA's ten-year validity when promoted. The later round that added intermediates,
+encrypted keys and DER loading was driven the same way, and caught a fourth: promoting a CA left
+the *this is itself a CA* box ticked, so the next certificate would quietly have been a second
+intermediate.
 
 ---
 
@@ -1119,7 +1166,16 @@ Honest list, in rough order of how much they matter:
     **pyjks**, which is what found the missing NULL parameter described in §8.6 — but pyjks needs
     a C compiler to install and keytool needs a JDK, so neither is a dependency the verification
     can assume. The PKCS#12 has no such gap: OpenSSL checks it on every run where OpenSSL exists.
-15. **No certificate *decoder*.** The ASN.1 reader in `asn1.ts` and `parseCertificate` in
+15. **A CA still cannot arrive as a `.p12`.** The page writes PKCS#12 but does not read it, and a
+    CA that already exists is as often in a `.p12` as in a pair of PEMs. Most of the parts are
+    there — the DER reader, PBES2, the RFC 7292 KDF — so what is missing is the container walk,
+    plus the same cipher floor as everywhere else: a legacy `.p12` encrypted with 3DES or RC2 will
+    not open in a browser whatever is written.
+16. **No CRL, and no revocation of any kind.** Nothing issued here can be withdrawn, and the
+    certificates carry no CRL distribution point or OCSP responder, so nothing checking for
+    revocation will find anything to check. For a PKI whose certificates are short-lived that is
+    survivable; for one that is not, it is the reason to use a real CA instead.
+17. **No certificate *decoder*.** The ASN.1 reader in `asn1.ts` and `parseCertificate` in
     `x509.ts` already do most of the work the decoder idea in §12 called for, but there is no page
     that takes a PEM and explains it.
 
@@ -1153,6 +1209,10 @@ Asked and answered before building §6.14:
 | A library (PKI.js, node-forge) or hand-written? | **Hand-written** — 12.8 KB gzipped against an order of magnitude more, and §1 |
 | Ed25519 keys? | **No** — WebCrypto support is too recent to rely on, and few stacks accept the certificates |
 | Legacy PKCS#12 encryption (3DES)? | **No** — WebCrypto has no 3DES, so PBES2/AES only |
+| Where does "is a CA" live? | **On the certificate, not the mode** — otherwise an intermediate is unreachable |
+| A fourth mode for intermediates? | **No** — a tick box in the signed mode, since everything else about the form is identical |
+| Decrypt CA keys in the page? | **Yes**, for PBES2 and the traditional `DEK-Info` PEM. Refuse DES/3DES/RC2 by name |
+| Accept binary DER? | **Yes**, through a file picker — a textarea cannot take binary, and `.crt` files are everywhere |
 
 ### Done
 
@@ -1182,9 +1242,11 @@ Nothing is half-built. Every tool in the registry marked `live` is complete and 
 4. **Passphrase default** (gap 1): per-wordlist recommended word counts so the default reaches
    *Strong*.
 5. **YAML highlighting and line numbers** (gap 5), on the same layer technique as JSON.
-6. **Certificate decoder** (gap 15): PEM in, subject, SANs, validity, key and fingerprints out.
+6. **Certificate decoder** (gap 17): PEM in, subject, SANs, validity, key and fingerprints out.
    Most of the cost was the ASN.1 reader, which §6.14 already paid.
-7. **Saved CAs** (§6.14): the deferred half of the certificate tool. The question it has to answer
+7. **Read a `.p12`** (gap 15), so a CA that lives in one can be used without a detour through
+   `openssl pkcs12 -nodes`.
+8. **Saved CAs** (§6.14): the deferred half of the certificate tool. The question it has to answer
    first is not technical — an unencrypted private key in `localStorage` is a real cost on a site
    whose whole claim is that nothing leaves the browser, and a passphrase-wrapped one trades that
    for a passphrase the user can lose. Not built until that is decided rather than defaulted.

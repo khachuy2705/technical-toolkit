@@ -22,7 +22,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { X509Certificate, createPublicKey, createPrivateKey, createHash } from "node:crypto";
@@ -31,6 +31,8 @@ import {
   integer,
   integerFromBytes,
   namedBits,
+  nullValue,
+  octetString,
   oid,
   readChildren,
   readDer,
@@ -39,8 +41,8 @@ import {
   time,
   utf16be,
 } from "../src/lib/asn1";
-import { decodePem, encodePem, findPem } from "../src/lib/pem";
-import { type HashName } from "../src/lib/keys";
+import { bytesToPemText, decodePem, encodePem, findPem } from "../src/lib/pem";
+import { importPrivateKeyPem, isEncryptedKeyPem, type HashName } from "../src/lib/keys";
 import {
   parseCertificate,
   parseSan,
@@ -48,7 +50,14 @@ import {
   resolveUsage,
   type Dn,
 } from "../src/lib/x509";
-import { generate, toSessionCa, buildP12, buildJavaKeystore, type GenerateInput } from "../src/lib/certgen";
+import {
+  buildJavaKeystore,
+  buildP12,
+  bundleIsCa,
+  generate,
+  toSessionCa,
+  type GenerateInput,
+} from "../src/lib/certgen";
 import { buildJks } from "../src/lib/jks";
 
 type Check = (name: string, condition: boolean, detail?: string) => void;
@@ -573,9 +582,318 @@ export async function runCertificateChecks(check: Check): Promise<void> {
     check("refuses a password under six characters", shortPassword);
   }
 
+
+  console.log("\n-- intermediate CA --");
+  {
+    // A three-tier PKI: root signs an intermediate, the intermediate signs a
+    // leaf. The point of the check is the middle certificate — before this it
+    // was impossible to make one, because being a CA implied being self-signed.
+    const rootInput: GenerateInput = {
+      ...BASE_INPUT,
+      mode: "ca",
+      subject: { CN: "Tier Root" },
+      sans: [],
+      purposes: [],
+      keyAlgoId: "rsa-2048",
+      days: 3650,
+      pathLength: 1,
+    };
+    const root = await generate(rootInput);
+    const rootCa = await toSessionCa(rootInput, root);
+
+    const midInput: GenerateInput = {
+      ...BASE_INPUT,
+      subject: { CN: "Tier Issuing CA" },
+      sans: [],
+      purposes: [],
+      keyAlgoId: "rsa-2048",
+      days: 1825,
+      isCa: true,
+      pathLength: 0,
+      issuer: { kind: "session" },
+      sessionCa: rootCa,
+    };
+    const mid = await generate(midInput);
+    const midCert = new X509Certificate(mid.certificatePem!);
+    const rootCert = new X509Certificate(root.certificatePem!);
+
+    check("the intermediate is a CA", midCert.ca);
+    check("signed by the root, not itself", midCert.issuer === rootCert.subject && midCert.subject !== midCert.issuer);
+    check("root's signature verifies", midCert.verify(rootCert.publicKey));
+    check("pathlen:0 is set", openssslText(mid.certificatePem!).includes("pathlen:0"), openssslText(mid.certificatePem!).slice(0, 200));
+    check("a CA carries no EKU", !openssslText(mid.certificatePem!).includes("Extended Key Usage"));
+    check("its chain reaches the root", decodePem(mid.chainPem ?? "").length === 2);
+
+    // The intermediate now signs, and its chain must come through whole.
+    const midCa = await toSessionCa(midInput, mid);
+    check("the intermediate can become the session CA", bundleIsCa(mid) && midCa.chain.length === 2);
+    check("and remembers its pathlen", midCa.pathLength === 0, String(midCa.pathLength));
+
+    const leaf = await generate({
+      ...BASE_INPUT,
+      subject: { CN: "server.tier.test" },
+      sans: parseSans("server.tier.test"),
+      issuer: { kind: "session" },
+      sessionCa: midCa,
+    });
+    const leafCert = new X509Certificate(leaf.certificatePem!);
+    check("the leaf is signed by the intermediate", leafCert.verify(midCert.publicKey));
+    check("not a CA itself", !leafCert.ca);
+    check(
+      "the full chain is leaf, intermediate, root",
+      decodePem(leaf.chainPem ?? "").length === 3,
+      String(decodePem(leaf.chainPem ?? "").length),
+    );
+
+    if (OPENSSL_AVAILABLE) {
+      // The real proof: OpenSSL builds and validates the whole path.
+      const dir = mkdtempSync(join(tmpdir(), "tt-chain-"));
+      try {
+        writeFileSync(join(dir, "root.pem"), root.certificatePem!);
+        writeFileSync(join(dir, "mid.pem"), mid.certificatePem!);
+        writeFileSync(join(dir, "leaf.pem"), leaf.certificatePem!);
+        const verified = openssl([
+          "verify", "-CAfile", join(dir, "root.pem"),
+          "-untrusted", join(dir, "mid.pem"), join(dir, "leaf.pem"),
+        ]);
+        check("OpenSSL validates the three-tier path", verified !== null && verified.includes("OK"), verified ?? "refused");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+
+    // A CA under a pathlen:0 CA is legal to emit and useless in practice.
+    const tooDeep = await generate({ ...midInput, subject: { CN: "Too Deep" }, issuer: { kind: "session" }, sessionCa: midCa });
+    check("warns about issuing a CA under pathlen:0", tooDeep.notes.some((n) => n.includes("pathlen:0")), tooDeep.notes.join(" | "));
+
+    // A CSR may also ask to be a CA.
+    const caCsr = await generate({
+      ...BASE_INPUT,
+      mode: "csr",
+      subject: { CN: "Requested CA" },
+      sans: [],
+      purposes: [],
+      isCa: true,
+      pathLength: null,
+    });
+    if (OPENSSL_AVAILABLE) {
+      const text = openssl(["req", "-verify", "-noout", "-text"], Buffer.from(caCsr.csrPem!)) ?? "";
+      check("a CSR can request CA:TRUE", text.includes("CA:TRUE"), text.slice(0, 300));
+    }
+  }
+
+  console.log("\n-- PEM headers --");
+  {
+    // RFC 1421 headers must be split off, not stripped: the letters in
+    // "ProcType" and "ENCRYPTED" survive a non-base64 filter and silently
+    // corrupt the key body.
+    const der = crypto.getRandomValues(new Uint8Array(96));
+    const withHeaders =
+      "-----BEGIN RSA PRIVATE KEY-----\n" +
+      "Proc-Type: 4,ENCRYPTED\n" +
+      "DEK-Info: AES-256-CBC,0123456789ABCDEF0123456789ABCDEF\n" +
+      "\n" +
+      encodePem("X", der).split("\n").slice(1, -2).join("\n") +
+      "\n-----END RSA PRIVATE KEY-----\n";
+
+    const block = decodePem(withHeaders)[0]!;
+    check("body survives the headers intact", hex(block.der) === hex(der), `${block.der.length} vs ${der.length} bytes`);
+    check("Proc-Type is read", block.headers["Proc-Type"] === "4,ENCRYPTED", JSON.stringify(block.headers));
+    check("DEK-Info is read", (block.headers["DEK-Info"] ?? "").startsWith("AES-256-CBC,"), JSON.stringify(block.headers));
+
+    // A plain block has no headers, and base64 is never mistaken for one.
+    const plain = decodePem(encodePem("CERTIFICATE", der))[0]!;
+    check("a plain block has no headers", Object.keys(plain.headers).length === 0);
+    check("and still round-trips", hex(plain.der) === hex(der));
+
+    check("an encrypted key is detected", isEncryptedKeyPem(withHeaders));
+    check("a plain key is not", !isEncryptedKeyPem(encodePem("PRIVATE KEY", der)));
+  }
+
+  console.log("\n-- DER input --");
+  {
+    const bundle = await generate({ ...BASE_INPUT, mode: "ca", subject: { CN: "DER Test" }, sans: [], purposes: [], keyAlgoId: "ec-p256" });
+    const der = findPem(bundle.certificatePem!, ["CERTIFICATE"]).der;
+
+    // A .crt straight off a device is binary; it has to come in as readily as
+    // the PEM does.
+    const converted = bytesToPemText(der, "CERTIFICATE");
+    check("binary DER becomes PEM", converted.startsWith("-----BEGIN CERTIFICATE-----"));
+    check("and parses to the same certificate", parseCertificate(converted).subject.includes("DER Test"));
+    check(
+      "PEM text is passed through untouched",
+      bytesToPemText(new TextEncoder().encode(bundle.certificatePem!), "CERTIFICATE") === bundle.certificatePem,
+    );
+  }
+
+  console.log("\n-- encrypted private keys --");
+  {
+    const passphrase = "correct horse battery staple";
+    const bundle = await generate({ ...BASE_INPUT, mode: "ca", subject: { CN: "Enc Test" }, sans: [], purposes: [], keyAlgoId: "rsa-2048" });
+    const plainPkcs8 = findPem(bundle.privateKeyPem, ["PRIVATE KEY"]).der;
+
+    // Refusals first: they must name the missing passphrase rather than blame
+    // the file.
+    const encrypted = await encryptPkcs8(plainPkcs8, passphrase);
+    await rejects(check, "an encrypted key with no passphrase", () => importPrivateKeyPem(encrypted, "SHA-256"), "passphrase");
+    await rejects(check, "an encrypted key with the wrong passphrase", () => importPrivateKeyPem(encrypted, "SHA-256", "wrong"), "passphrase");
+
+    const opened = await importPrivateKeyPem(encrypted, "SHA-256", passphrase);
+    check("PBES2 round-trips to the original key", hex(opened.pkcs8) === hex(plainPkcs8), `${opened.pkcs8.length} bytes`);
+    check("and the algorithm is recognised", opened.algo.id === "rsa-2048", opened.algo.id);
+
+    if (OPENSSL_AVAILABLE) {
+      const dir = mkdtempSync(join(tmpdir(), "tt-enc-"));
+      try {
+        const plainFile = join(dir, "plain.key");
+        writeFileSync(plainFile, bundle.privateKeyPem);
+
+        // Keys written by OpenSSL itself, which is the oracle that matters:
+        // these are the forms a real CA key actually arrives in.
+        const forms: [string, string[], string][] = [
+          ["PBES2 AES-256 / SHA-256", ["-v2", "aes-256-cbc", "-v2prf", "hmacWithSHA256"], "pbes2-256.key"],
+          ["PBES2 AES-128 / SHA-1 PRF", ["-v2", "aes-128-cbc", "-v2prf", "hmacWithSHA1"], "pbes2-128.key"],
+          ["PBES2 at OpenSSL's default", [], "pbes2-default.key"],
+        ];
+        for (const [name, args, file] of forms) {
+          const out = join(dir, file);
+          const made = openssl(["pkcs8", "-topk8", "-in", plainFile, "-out", out, "-passout", `pass:${passphrase}`, ...args]);
+          if (made === null) {
+            check(`openssl wrote ${name}`, false, "openssl refused");
+            continue;
+          }
+          const text = readFileSync(out, "utf8");
+          const back = await importPrivateKeyPem(text, "SHA-256", passphrase);
+          check(`opens ${name}`, hex(back.pkcs8) === hex(plainPkcs8), `${back.pkcs8.length} bytes`);
+        }
+
+        // The traditional PEM, whose key schedule is MD5-based EVP_BytesToKey.
+        const trad = join(dir, "trad.key");
+        if (openssl(["rsa", "-in", plainFile, "-out", trad, "-aes256", "-traditional", "-passout", `pass:${passphrase}`]) !== null) {
+          const text = readFileSync(trad, "utf8");
+          check("the traditional PEM is detected as encrypted", isEncryptedKeyPem(text));
+          const back = await importPrivateKeyPem(text, "SHA-256", passphrase);
+          check("opens a DEK-Info AES-256-CBC key", hex(back.pkcs8) === hex(plainPkcs8), `${back.pkcs8.length} bytes`);
+          await rejects(check, "a DEK-Info key with the wrong passphrase", () => importPrivateKeyPem(text, "SHA-256", "wrong"), "passphrase");
+        }
+
+        // 3DES is a real format we genuinely cannot open. The message must say
+        // so and offer the way out, not report a wrong passphrase.
+        const des3 = join(dir, "des3.key");
+        if (openssl(["pkcs8", "-topk8", "-in", plainFile, "-out", des3, "-passout", `pass:${passphrase}`, "-v1", "PBE-SHA1-3DES"]) !== null) {
+          const text = readFileSync(des3, "utf8");
+          let message = "";
+          try {
+            await importPrivateKeyPem(text, "SHA-256", passphrase);
+          } catch (error) {
+            message = error instanceof Error ? error.message : String(error);
+          }
+          check("refuses 3DES by name", message.includes("3DES"), message);
+          check("and says how to convert it", message.includes("openssl pkcs8"), message);
+        }
+
+        // An EC key takes a different PKCS#8 body through the same decryption.
+        const ecBundle = await generate({ ...BASE_INPUT, mode: "ca", subject: { CN: "Enc EC" }, sans: [], purposes: [], keyAlgoId: "ec-p384" });
+        const ecPlain = join(dir, "ec.key");
+        writeFileSync(ecPlain, ecBundle.privateKeyPem);
+        const ecEnc = join(dir, "ec-enc.key");
+        if (openssl(["pkcs8", "-topk8", "-in", ecPlain, "-out", ecEnc, "-passout", `pass:${passphrase}`, "-v2", "aes-256-cbc"]) !== null) {
+          const back = await importPrivateKeyPem(readFileSync(ecEnc, "utf8"), "SHA-384", passphrase);
+          check("opens an encrypted EC key", back.algo.id === "ec-p384", back.algo.id);
+        }
+
+        // And the whole point: signing with an encrypted CA key, end to end.
+        const signed = await generate({
+          ...BASE_INPUT,
+          subject: { CN: "signed-by-encrypted.test" },
+          issuer: {
+            kind: "upload",
+            certPem: bundle.certificatePem!,
+            keyPem: readFileSync(join(dir, "pbes2-256.key"), "utf8"),
+            passphrase,
+          },
+        });
+        check(
+          "signs with an encrypted CA key",
+          new X509Certificate(signed.certificatePem!).verify(new X509Certificate(bundle.certificatePem!).publicKey),
+        );
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  }
+
   if (!OPENSSL_AVAILABLE) {
     console.log("\n  note: openssl is not on PATH — the OpenSSL cross-checks were skipped.");
   }
+}
+
+/** Asserts that a call rejects, and that its message mentions `contains`. */
+async function rejects(
+  check: Check,
+  what: string,
+  run: () => Promise<unknown>,
+  contains: string,
+): Promise<void> {
+  let message = "";
+  try {
+    await run();
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  check(
+    `refuses ${what}`,
+    message.toLowerCase().includes(contains.toLowerCase()),
+    message || "it was accepted",
+  );
+}
+
+/**
+ * Wraps a PKCS#8 as an `ENCRYPTED PRIVATE KEY` under PBES2, so the decryption
+ * path can be round-tripped without OpenSSL on the machine.
+ *
+ * This is self-consistency only — it proves the reader undoes what this writer
+ * did. The OpenSSL-written keys below are what prove the reader understands the
+ * format as everyone else writes it.
+ */
+async function encryptPkcs8(pkcs8: Uint8Array, passphrase: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(16));
+  const iterations = 10_000;
+
+  const base = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(passphrase),
+    "PBKDF2",
+    false,
+    ["deriveKey"],
+  );
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
+    base,
+    { name: "AES-CBC", length: 256 },
+    false,
+    ["encrypt"],
+  );
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-CBC", iv }, key, pkcs8.slice().buffer),
+  );
+
+  const algorithm = sequence(
+    oid("1.2.840.113549.1.5.13"),
+    sequence(
+      sequence(
+        oid("1.2.840.113549.1.5.12"),
+        sequence(
+          octetString(salt),
+          integer(iterations),
+          sequence(oid("1.2.840.113549.2.9"), nullValue()),
+        ),
+      ),
+      sequence(oid("2.16.840.1.101.3.4.1.42"), octetString(iv)),
+    ),
+  );
+  return encodePem("ENCRYPTED PRIVATE KEY", sequence(algorithm, octetString(ciphertext)));
 }
 
 /** Asserts that `generate` refuses an input, and does so with a message. */
