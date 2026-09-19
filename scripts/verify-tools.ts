@@ -4,6 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { DEFAULT_SPOOF_OPTIONS, UNICODE_INPUT_LIMIT, UNICODE_CHANGE_LIMIT, spoofUnicode, unicodeCodePoints } from "../src/lib/unicode";
 import { decodeBase64, encodeBase64, bytesToBase64, base64ToBytes } from "../src/lib/base64";
 import { hashBytes, hashText, toHex } from "../src/lib/hash";
 import { md5 } from "../src/lib/md5";
@@ -128,6 +129,34 @@ function md5Hex(text: string): string {
 }
 
 export async function runToolChecks(check: Check): Promise<void> {
+  console.log("\n-- unicode spoofer --");
+  {
+    const off = { letters: false, punctuation: false, spaces: false, zeroWidth: false };
+    const text = "aA! ;,-.\nChào e\u0301 👩‍💻 🇻🇳 <script>&";
+    check("disabled transformations preserve exact input", spoofUnicode(text, off).output === text);
+    const letters = spoofUnicode("aAcC xyz!", DEFAULT_SPOOF_OPTIONS);
+    check("maps supported letters to exact Greek/Cyrillic code points", letters.output === "\u0430\u0410\u0441\u0421 \u0445\u0443z!");
+    check("counts replacements and input positions", letters.replacements === 6 && letters.changes[4]?.position === 6);
+    check("unchanged characters are masked only in preview", letters.preview === "\u0430\u0410\u0441\u0421◌\u0445\u0443◌◌");
+    check("punctuation option changes only its documented set", spoofUnicode("!.,;-:?'", { ...off, punctuation: true }).output === "\u01c3\u2024\u201a\u037e\u2010:?'");
+    check("space option preserves tabs and newlines", spoofUnicode("a \t\r\n b", { ...off, spaces: true }).output === "a\u2005\t\r\n\u2005b");
+    check("accented graphemes and emoji survive letter replacement", spoofUnicode("á e\u0301 👩‍💻 🇻🇳", DEFAULT_SPOOF_OPTIONS).output === "á e\u0301 👩‍💻 🇻🇳");
+    const joined = spoofUnicode("e\u0301👩‍💻🇻🇳\r\na", { ...off, zeroWidth: true });
+    check("zero-width insertion respects graphemes and CRLF", joined.output === "e\u0301\u200b👩‍💻\u200b🇻🇳\r\na" && joined.insertions === 2);
+    check("zero-width insertion skips Unicode line separators", spoofUnicode("a\u2028b\u2029c", { ...off, zeroWidth: true }).insertions === 0);
+    check("single grapheme has no trailing insertion", spoofUnicode("👩‍💻", { ...off, zeroWidth: true }).output === "👩‍💻");
+    const all = spoofUnicode("a !", { letters: true, punctuation: true, spaces: true, zeroWidth: true });
+    check("options compose and preserve the full output", all.output === "\u0430\u200b\u2005\u200b\u01c3" && all.changes.length === 5);
+    check("preview exposes invisible insertions and spaces", all.preview === "\u0430[U+200B][U+2005][U+200B]\u01c3");
+    check("code point labels handle astral and combining characters", unicodeCodePoints("😀e\u0301") === "U+1F600 U+0065 U+0301");
+    const large = spoofUnicode("a".repeat(UNICODE_CHANGE_LIMIT + 25), DEFAULT_SPOOF_OPTIONS);
+    check("table cap does not truncate output or counts", large.changes.length === UNICODE_CHANGE_LIMIT && large.replacements === UNICODE_CHANGE_LIMIT + 25 && large.output === "\u0430".repeat(UNICODE_CHANGE_LIMIT + 25));
+    check("input at the limit is accepted", spoofUnicode("z".repeat(UNICODE_INPUT_LIMIT), off).output.length === UNICODE_INPUT_LIMIT);
+    let refused = false;
+    try { spoofUnicode("a".repeat(UNICODE_INPUT_LIMIT + 1), off); } catch { refused = true; }
+    check("oversized input is refused rather than truncated", refused);
+    check("empty input has no changes", spoofUnicode("", DEFAULT_SPOOF_OPTIONS).changes.length === 0);
+  }
   console.log("\n-- md5 --");
   {
     for (const [input, expected] of RFC1321) {

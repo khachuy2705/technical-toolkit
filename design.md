@@ -74,6 +74,7 @@ src/
 │   ├── iprange.ts         Range→CIDR, aggregate, supernet, split — both families
 │   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
+│   ├── unicode.ts         Grapheme-safe homoglyph substitution and change records
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -121,6 +122,7 @@ src/
 │   └── tools/
 │       ├── password-generator.astro
 │       ├── passphrase-generator.astro
+│       ├── unicode-spoofer.astro
 │       ├── base64.astro
 │       ├── hash-generator.astro
 │       ├── json-formatter.astro
@@ -766,7 +768,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, and thirteen tools in four groups (§5, *Tool groups*).
+- **Pages** — home, about, privacy, 404, and fifteen tools in four groups (§5, *Tool groups*).
 - **Navigation** — header links to the four groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
@@ -774,6 +776,27 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Accessibility** — semantic landmarks, `aria-current` on the active nav item, visible focus
   rings, `prefers-reduced-motion` honoured, live region for copy feedback.
 - **Responsive** — single fluid grid, controls reflow to one column on narrow screens.
+
+### 6.17 Unicode text spoofer — `/tools/unicode-spoofer/`
+
+Two panes show the original and spoofed text. Four independent options replace supported
+ASCII letters with Greek/Cyrillic lookalikes (on by default), substitute five punctuation marks,
+replace ordinary spaces with U+2005, and insert U+200B zero-width spaces (all off by default).
+The mapping is small and deterministic; this is not a comprehensive Unicode spoof detector.
+
+- `Intl.Segmenter` keeps graphemes intact: accented letters, combining sequences and emoji
+  are preserved. Zero-width spaces go only between graphemes, never around line breaks or
+  after the last character. Older browsers without Segmenter get a named error.
+- An optional separate preview masks unchanged graphemes with `◌` and labels changed spaces.
+  Copy and Save always use the complete transformed text, never the masked preview.
+- A change table reports one-based input grapheme positions, original/replacement code points
+  and change kinds. Insertions are recorded after their input position. It displays the first
+  200 changes while the counts and output remain complete.
+- Input is limited to 100,000 UTF-16 code units, with an error rather than silent truncation.
+- Only the five checkbox preferences are stored (`tt-unicode-spoofer`). Input and output are
+  never persisted. All dynamic display text is inserted with `textContent`.
+- Checks in `verify-tools.ts` pin mapping code points, option combinations, grapheme and CRLF
+  preservation, preview/output separation, insertion boundaries and size limits.
 
 ---
 
@@ -1259,7 +1282,7 @@ Asked and answered before building §6.14:
 | Area | What |
 |---|---|
 | Generators | Password and passphrase generators, entropy readout, bulk mode |
-| Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML |
+| Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes |
 | Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
 | Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
 | Certificates | Root CA, CA-signed certificates and CSRs; purpose-driven key usage and EKU; PEM, PKCS#12 and JKS export |

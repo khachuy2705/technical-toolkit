@@ -1,0 +1,134 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+import { UNICODE_CHANGE_LIMIT, UNICODE_INPUT_LIMIT } from "../../lib/unicode";
+---
+
+<ToolLayout slug="unicode-spoofer">
+  <section class="card">
+    <fieldset class="spoof-options">
+      <legend class="field__label">Characters to change</legend>
+      <div class="controls">
+        <label class="check"><input id="spoof-letters" type="checkbox" checked /><span class="check__text">Spoof letters<span class="check__sample">Supported Latin letters → Greek or Cyrillic lookalikes</span></span></label>
+        <label class="check"><input id="spoof-punctuation" type="checkbox" /><span class="check__text">Spoof punctuation<span class="check__sample">Exclamation mark, dot, comma, semicolon and hyphen</span></span></label>
+        <label class="check"><input id="spoof-spaces" type="checkbox" /><span class="check__text">Spoof spaces<span class="check__sample">Regular space → four-per-em space (U+2005)</span></span></label>
+        <label class="check"><input id="spoof-zero-width" type="checkbox" /><span class="check__text">Insert zero-width spaces<span class="check__sample">U+200B between characters; emoji and line breaks stay intact</span></span></label>
+      </div>
+    </fieldset>
+    <p class="field__hint">Up to {UNICODE_INPUT_LIMIT.toLocaleString("en-US")} UTF-16 code units. Unsupported characters and accented letters stay unchanged.</p>
+  </section>
+
+  <IoPanel inputLabel="Original text" outputLabel="Spoofed text" placeholder="Type text to replace letters with Unicode lookalikes…" />
+
+  <section class="card" aria-labelledby="changes-title">
+    <h2 id="changes-title">What changed?</h2>
+    <p id="spoof-summary" role="status">Enter text to inspect its replacements.</p>
+    <label class="check"><input id="spoof-preview-toggle" type="checkbox" /><span class="check__text">Preview changed characters only<span class="check__sample">◌ marks unchanged characters. Inserted and replaced spaces are labelled. Copy and Save always use the full output.</span></span></label>
+    <pre id="spoof-preview" class="spoof-preview" hidden></pre>
+    <div id="spoof-table-wrap" class="spoof-table-wrap" tabindex="0" role="region" aria-label="Unicode changes" hidden>
+      <table>
+        <caption>Input positions count visible characters (graphemes), starting at 1. Insertions are placed after the listed position.</caption>
+        <thead><tr><th scope="col">Position</th><th scope="col">Original</th><th scope="col">Replacement</th><th scope="col">Change</th></tr></thead>
+        <tbody id="spoof-changes"></tbody>
+      </table>
+    </div>
+    <p class="field__hint">The table shows the first {UNICODE_CHANGE_LIMIT} changes; Copy and Save include the entire result.</p>
+  </section>
+
+  <section class="card prose">
+    <h2>Same appearance, different text</h2>
+    <p>A Latin <code>a</code> (U+0061) and a Cyrillic <code>а</code> (U+0430) can look alike while comparing as different characters. Use this tool to create test text and inspect those differences. Appearance depends on the font.</p>
+    <p>This is a fixed set of substitutions, not a detector for every Unicode lookalike. It preserves accented letters, combining sequences and emoji rather than splitting them. There is no automatic reverse conversion.</p>
+    <p>Only checkbox preferences are remembered. Your input and output stay in this page and are never saved to browser storage.</p>
+  </section>
+</ToolLayout>
+
+<style>
+  .spoof-options { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+  .spoof-options legend { margin-bottom: 1rem; }
+  .spoof-options .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 660px) { .spoof-options .controls { grid-template-columns: 1fr; } }
+  .spoof-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: var(--accent-soft); color: var(--text); border-radius: 8px; max-height: 20rem; overflow: auto; }
+  .spoof-table-wrap { overflow: auto; max-height: 28rem; margin-top: 1rem; }
+  table { width: 100%; min-width: 34rem; border-collapse: collapse; text-align: left; }
+  caption { text-align: left; color: var(--text-muted); padding-bottom: .75rem; font-size: .85rem; }
+  th, .spoof-table-wrap :global(td) { padding: .65rem; border-bottom: 1px solid var(--border); }
+  th { white-space: nowrap; }
+  .spoof-table-wrap :global(td) { font-family: var(--font-mono); overflow-wrap: anywhere; }
+</style>
+
+<script>
+  import { DEFAULT_SPOOF_OPTIONS, spoofUnicode, unicodeCodePoints, type SpoofOptions } from "../../lib/unicode";
+  import { attachTextIo } from "../../lib/textio";
+  import { el, loadPrefs, savePrefs } from "../../lib/ui";
+  const PREFS_KEY = "tt-unicode-spoofer";
+  const controls = {
+    letters: el<HTMLInputElement>("#spoof-letters"),
+    punctuation: el<HTMLInputElement>("#spoof-punctuation"),
+    spaces: el<HTMLInputElement>("#spoof-spaces"),
+    zeroWidth: el<HTMLInputElement>("#spoof-zero-width"),
+  };
+  const previewToggle = el<HTMLInputElement>("#spoof-preview-toggle");
+  const prefs = loadPrefs(PREFS_KEY, { ...DEFAULT_SPOOF_OPTIONS, preview: false });
+  for (const key of Object.keys(controls) as (keyof SpoofOptions)[]) {
+    controls[key].checked = typeof prefs[key] === "boolean" ? prefs[key] : DEFAULT_SPOOF_OPTIONS[key];
+  }
+  previewToggle.checked = prefs.preview === true;
+  const summary = el("#spoof-summary");
+  const preview = el<HTMLElement>("#spoof-preview");
+  const table = el<HTMLElement>("#spoof-table-wrap");
+  const body = el("#spoof-changes");
+  const describe = (text: string): string => {
+    const label = text === " " ? "SPACE" : text === "\u2005" ? "FOUR-PER-EM SPACE" : text === "\u200b" ? "ZERO WIDTH SPACE" : text;
+    return text ? `${label} · ${unicodeCodePoints(text)}` : "—";
+  };
+  const reset = () => {
+    summary.textContent = "Enter text to inspect its replacements.";
+    body.replaceChildren();
+    table.hidden = true;
+    preview.textContent = "";
+    preview.hidden = true;
+  };
+  const io = attachTextIo({
+    downloadName: "unicode-spoofed.txt",
+    sample: "Same appearance, different text!\nChào thế giới 👩‍💻",
+    onEmpty: reset,
+    transform(input) {
+      try {
+        const result = spoofUnicode(input, {
+          letters: controls.letters.checked, punctuation: controls.punctuation.checked,
+          spaces: controls.spaces.checked, zeroWidth: controls.zeroWidth.checked,
+        });
+        const total = result.replacements + result.insertions;
+        summary.textContent = `${result.replacements} replacements · ${result.insertions} zero-width spaces inserted` + (total > result.changes.length ? ` · Showing ${result.changes.length} of ${total} changes` : "");
+        preview.textContent = result.preview;
+        preview.hidden = !previewToggle.checked;
+        const rows = result.changes.map((change) => {
+          const row = document.createElement("tr");
+          for (const text of [String(change.position), describe(change.before), describe(change.after), change.kind]) {
+            const cell = document.createElement("td");
+            cell.textContent = text;
+            row.append(cell);
+          }
+          return row;
+        });
+        body.replaceChildren(...rows);
+        table.hidden = total === 0;
+        return { ok: true, output: result.output };
+      } catch (error) {
+        reset();
+        summary.textContent = "Resolve the input error to inspect changes.";
+        return { ok: false, message: error instanceof Error ? error.message : "Could not process this text." };
+      }
+    },
+  });
+  for (const control of [...Object.values(controls), previewToggle]) {
+    control.addEventListener("change", () => {
+      savePrefs(PREFS_KEY, {
+        letters: controls.letters.checked, punctuation: controls.punctuation.checked,
+        spaces: controls.spaces.checked, zeroWidth: controls.zeroWidth.checked, preview: previewToggle.checked,
+      });
+      io.run();
+    });
+  }
+</script>

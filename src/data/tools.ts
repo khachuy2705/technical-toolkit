@@ -57,6 +57,17 @@ export interface Tool {
 
 export const TOOLS: readonly Tool[] = [
   {
+    slug: 'unicode-spoofer',
+    name: 'Unicode Text Spoofer',
+    tagline: 'Lookalike letters, with every change explained.',
+    description: 'Replace text with Unicode homoglyphs, substitute punctuation and spaces, and inspect every changed code point. Runs entirely in your browser.',
+    keywords: ['unicode spoofer', 'homoglyph', 'unicode lookalike', 'zero width space', 'code points'],
+    icon: '<path d="m3 19 5-14 5 14M5 14h6"/><path d="M16 9h3a2 2 0 0 1 2 2v8m0-6h-3a3 3 0 0 0 0 6h3"/>',
+    status: 'live',
+    group: 'data',
+    vi: { name: 'Thay ký tự Unicode', tagline: 'Ký tự trông giống nhau, đối chiếu từng mã Unicode.' },
+  },
+  {
     slug: 'password-generator',
     name: 'Password Generator',
     tagline: 'Random passwords with a live strength readout.',

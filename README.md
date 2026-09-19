@@ -6,7 +6,7 @@ its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
-**YAML formatter**, **epoch converter**, **lunar calendar converter** (âm lịch), and a network
+**YAML formatter**, **Unicode text spoofer**, **epoch converter**, **lunar calendar converter** (âm lịch), and a network
 group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
 splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data
 formats, Date & time.
