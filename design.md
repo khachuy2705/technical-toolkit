@@ -74,6 +74,7 @@ src/
 │   ├── iprange.ts         Range→CIDR, aggregate, supernet, split — both families
 │   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
+│   ├── txcode.ts          Transaction codes: year + day of year → a date
 │   ├── unicode.ts         Grapheme-safe homoglyph substitution and change records
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
@@ -134,13 +135,14 @@ src/
 │       ├── cidr-splitter.astro
 │       ├── ipv6-calculator.astro
 │       ├── epoch-converter.astro
-│       └── lunar-calendar.astro
+│       ├── lunar-calendar.astro
+│       └── transaction-code-decoder.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 6162 lines of logic in `lib/`, 681 of components and layouts, 5148 of pages, 1960 of
-CSS, 2221 of verification. The wordlist modules are generated and excluded from that count. The
+Rough scale: 7174 lines of logic in `lib/`, 681 of components and layouts, 6256 of pages, 2099 of
+CSS, 3013 of verification. The wordlist modules are generated and excluded from that count. The
 certificate stack (`asn1` through `certgen`) is about 2,500 of the `lib/` total — the largest
 single feature in the project, and the reason §8.6 exists.
 
@@ -190,12 +192,12 @@ interface Tool {
   keywords: readonly string[];
   icon: string;         // inner markup of a 24×24 stroked SVG
   status: 'live' | 'planned';
-  group: 'network' | 'security' | 'data' | 'time';
+  group: 'network' | 'security' | 'data' | 'time' | 'other';
   vi: { name: string; tagline: string; description?: string };  // see "Page language" below
 }
 ```
 
-`TOOL_GROUPS` fixes the order and the display names (English and Vietnamese) of the four groups.
+`TOOL_GROUPS` fixes the order and the display names (English and Vietnamese) of the five groups.
 
 Everything derives from it:
 
@@ -223,14 +225,15 @@ entry a `vi` name and tagline too — the Vietnamese page lists every tool in it
 
 ### Tool groups
 
-Thirteen tools do not fit in a header, and a flat grid of them buries related tools among
-unrelated ones. So every tool belongs to one of four groups — **Network**, **Security**,
-**Data formats**, **Date & time** — and the group is what the navigation is built from:
+Sixteen tools do not fit in a header, and a flat grid of them buries related tools among
+unrelated ones. So every tool belongs to one of five groups — **Network**, **Security**,
+**Data formats**, **Date & time**, **Other** — and the group is what the navigation is built
+from:
 
 - **Home page** — one titled section per group (`id="network"` and so on), in `TOOL_GROUPS`
   order. Sections carry `scroll-margin-top` so the sticky header does not cover a heading
   reached by anchor.
-- **Header** — four links, one per group, to `/#<group>`. This was chosen over per-group
+- **Header** — one link per group, to `/#<group>`. This was chosen over per-group
   dropdown menus: it needs no script, works the same on every page, and the home page already
   is the grouped menu. Hidden below 660px, like the tool links it replaced.
 - **Sibling strip** — `ToolGroupNav` sits between the breadcrumb and the title of every tool
@@ -758,7 +761,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   then.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
   `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`, `tt-subnet`, `tt-range`,
-  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`) and restored on the next visit. Output is never stored. A stored value naming
+  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`) and restored on the next visit. Output is never stored. A stored value naming
   a wordlist or separator we no longer ship falls back to the default instead of blanking the
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
@@ -768,8 +771,8 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, and fifteen tools in four groups (§5, *Tool groups*).
-- **Navigation** — header links to the four groups; a sibling strip on every tool page.
+- **Pages** — home, about, privacy, 404, and sixteen tools in five groups (§5, *Tool groups*).
+- **Navigation** — header links to the five groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
 - **Prefetch** — Astro prefetches links on hover.
@@ -797,6 +800,58 @@ The mapping is small and deterministic; this is not a comprehensive Unicode spoo
   never persisted. All dynamic display text is inserted with `textContent`.
 - Checks in `verify-tools.ts` pin mapping code points, option combinations, grapheme and CRLF
   preservation, preview/output separation, insertion boundaries and size limits.
+
+### 6.18 Transaction code date decoder — `/tools/transaction-code-decoder/`
+
+**The page is Vietnamese**, for the same reason the lunar calendar page is (§6.13): the codes are
+issued by Vietnamese systems and read by the people those systems bill. `lib/txcode.ts` throws its
+refusals as `TxCodeError` with Vietnamese messages, and the page shows only those verbatim.
+
+Reads the date out of a transaction reference whose first five digits are a date:
+
+```
+262641267307
+├┘└─┘└─────┘
+│  │    └── serial, assigned by the issuing system
+│  └─────── day 264 of the year
+└────────── year 26
+```
+
+Day 264 of 2026 is 21 September 2026. The point of the tool is that this is an **ordinal date** —
+the day's number within the year, not a day and a month — so it cannot be read off by eye, and the
+one thing that makes it hard to do in your head is the leap day: day 60 is 1 March in a common year
+and 29 February in a leap one.
+
+| Control | Options | Default |
+|---|---|---|
+| Code | one code, separators ignored | the worked example |
+| Century for the two year digits | 1900–1999, 2000–2099, 2100–2199 | **2000–2099** |
+| Reverse lookup | a date → the five digits every code that day begins with | today |
+| Sample code length | 5 – 32 digits | 12 |
+| Batch | one code per line, up to 500 | — |
+
+- **The code is shown cut into its parts**, each with its meaning underneath, because the whole
+  difficulty is that the first five digits are two fields rather than one.
+- **The century is a control, not a constant.** Two digits of year cannot distinguish 1998 from
+  2098, and nothing inside the code can. The page says so and lets the century be chosen, rather
+  than quietly assuming one; `decodeTxCode` takes it as a parameter for the same reason.
+- **Day 000 and a day past the year's length are refused by name** — `25366` says that 2025 has
+  only 365 days, rather than silently rolling over into 1 January 2026, which is what a naive
+  `new Date(year, 0, ordinal)` would do.
+- **Separators are stripped, letters are not.** Codes get written down spaced, dotted and dashed,
+  so those are ignored; a stray letter is reported with the character named, because it usually
+  means a different field was copied.
+- **The reverse direction and the decoder are the same arithmetic**, and the suite pins them to
+  each other over all 36,525 days of 2000–2099 rather than to fixtures (§9).
+- **The generated sample code is labelled as a sample.** Only the first five digits are real; the
+  tail is random, and the page says it is for filling a test system or a screenshot, not a
+  transaction reference that exists.
+- The batch pane decodes a pasted list into a table, with each failed line carrying its own reason
+  in place of the date, and a tab-separated copy for pasting into a spreadsheet.
+- A build-time table gives the ordinal range of every month in a common and a leap year, generated
+  by the same `dayOfYear` the tool runs. February is the only row marked, because it is where the
+  two columns part company.
+- Only the century and the sample length are stored (`tt-txcode`). No code is ever persisted.
 
 ---
 
@@ -978,7 +1033,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 698 checks, Node, no browser
+npm run verify   # 751 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -1088,6 +1143,12 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **Lunar calendar** — Tết dates, leap months and Can Chi against public record, the Hanoi/Beijing
   splits of 1968 and 1985, the 1967/1968 era join, every refusal by name, and a solar→lunar→solar
   round trip over every day from 1900 to 2199 (about 0.4 s).
+- **Transaction codes** — the worked example pinned field by field, the leap-day cases (day 60 is
+  1 March in a common year and 29 February in a leap one, day 366 exists only in a leap year),
+  the century being applied rather than assumed, every refusal by name and by type, a generated
+  sample decoding back to its own date at every legal length, and **all 36,525 days of
+  2000–2099 out through the prefix and back**, which is what pins the two directions to each
+  other rather than to a handful of fixtures.
 - **JSON highlighting** — tokens tile every input with no gap or overlap and the layer's text
   equals the textarea's (fuzzed over 3,000 inputs), key/string classification, markup escaping,
   and where the error mark lands.
@@ -1146,6 +1207,7 @@ Bundle sizes as built (gzip in brackets):
 | YAML page script | 2.6 KB (1.3 KB) | YAML page |
 | Epoch page script | 11.6 KB (4.8 KB) | epoch page |
 | Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
+| Transaction code page script | 7.7 KB (3.4 KB) | transaction code page |
 | IPv6 library | 5.3 KB (2.4 KB) | IPv6 page and the three range tools |
 | Range library | 4.9 KB (2.1 KB) | range, aggregator and splitter pages |
 | Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |

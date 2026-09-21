@@ -1,0 +1,710 @@
+---
+/**
+ * Vietnamese, for the same reason the lunar calendar page is: the codes are
+ * issued by Vietnamese systems and read by the people those systems bill.
+ * `lang="vi"` on the layout switches the shared chrome to match.
+ */
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import { dayOfYear, daysInMonth } from "../../lib/epoch";
+import {
+  CENTURIES,
+  DATE_DIGITS,
+  DAY_DIGITS,
+  DEFAULT_CENTURY,
+  formatDate,
+  TX_BATCH_LIMIT,
+  TX_CODE_LENGTH,
+  TX_CODE_MAX_DIGITS,
+  decodeTxCode,
+  weekdayName,
+  YEAR_DIGITS,
+} from "../../lib/txcode";
+
+/** The four an accountant reads off the code carry the accent; the rest is detail. */
+const FACTS = [
+  { id: "date", label: "Ngày giao dịch", primary: true },
+  { id: "weekday", label: "Thứ", primary: true },
+  { id: "doy", label: "Ngày trong năm", primary: true },
+  { id: "serial", label: "Phần số thứ tự", primary: true },
+  { id: "iso", label: "Dạng năm-tháng-ngày", primary: false },
+  { id: "quarter", label: "Quý", primary: false },
+  { id: "week", label: "Tuần ISO", primary: false },
+  { id: "gap", label: "So với hôm nay", primary: false },
+  { id: "length", label: "Độ dài mã", primary: false },
+] as const;
+
+const BUILD_ROWS = [
+  { id: "b-prefix", label: `${DATE_DIGITS} chữ số đầu của mã` },
+  { id: "b-sample", label: "Mã mẫu" },
+  { id: "b-doy", label: "Ngày trong năm" },
+  { id: "b-weekday", label: "Thứ" },
+] as const;
+
+const PRESETS = ["262641267307", "26001", "24366", "990010000001"];
+
+/**
+ * The worked example, decoded at build time by the same function the page runs,
+ * so the sentence below can never disagree with the tool above it.
+ */
+const EXAMPLE = decodeTxCode(PRESETS[0]!);
+
+const MONTHS_VI = [
+  "Tháng 1", "Tháng 2", "Tháng 3", "Tháng 4", "Tháng 5", "Tháng 6",
+  "Tháng 7", "Tháng 8", "Tháng 9", "Tháng 10", "Tháng 11", "Tháng 12",
+];
+
+/**
+ * Which ordinals belong to which month, in a common year and a leap year.
+ * February is the row that is marked, because it is where the two columns part
+ * company; every month after it simply carries that one day along.
+ */
+const COMMON_YEAR = 2026;
+const LEAP_YEAR = 2028;
+const pad3 = (n: number) => String(n).padStart(3, "0");
+const span = (year: number, month: number) =>
+  `${pad3(dayOfYear(year, month, 1))}–${pad3(dayOfYear(year, month, daysInMonth(year, month)))}`;
+
+const MONTH_TABLE = MONTHS_VI.map((name, i) => ({
+  name,
+  days: i + 1 === 2 ? "28 / 29" : String(daysInMonth(COMMON_YEAR, i + 1)),
+  common: span(COMMON_YEAR, i + 1),
+  leap: span(LEAP_YEAR, i + 1),
+  marked: i + 1 === 2,
+}));
+---
+
+<ToolLayout slug="transaction-code-decoder" lang="vi">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="code">Mã giao dịch</label>
+      <span class="io__meta" id="code-meta"></span>
+    </div>
+
+    <input
+      type="text"
+      id="code"
+      class="big-input"
+      value={PRESETS[0]}
+      placeholder="262641267307"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      inputmode="numeric"
+    />
+
+    <p class="field__hint" style="margin-top:0.5rem">
+      Dấu cách, dấu chấm và dấu gạch trong mã được bỏ qua, nên dán thẳng từ sao kê cũng được.
+    </p>
+
+    <div class="txsplit" id="split" hidden>
+      {
+        [
+          { part: "year", label: `${YEAR_DIGITS} chữ số năm` },
+          { part: "day", label: `${DAY_DIGITS} chữ số ngày` },
+          { part: "serial", label: "số thứ tự" },
+        ].map((piece) => (
+          <div class="txsplit__part" data-part={piece.part}>
+            <span class="txsplit__digits" data-split={piece.part}>
+              &mdash;
+            </span>
+            <span class="txsplit__label">{piece.label}</span>
+            <span class="txsplit__meaning" data-split-note={piece.part} />
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="preset-row">
+      <button type="button" class="btn btn--tiny" id="code-today">Mã của hôm nay</button>
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+    </div>
+
+    <div class="field" style="margin-top:1rem">
+      <span class="field__label">Hai chữ số năm thuộc thế kỷ</span>
+      <div class="segmented" role="radiogroup" aria-label="Thế kỷ của hai chữ số năm">
+        {
+          CENTURIES.map((century) => (
+            <label>
+              <input
+                type="radio"
+                name="century"
+                value={String(century)}
+                checked={century === DEFAULT_CENTURY}
+              />
+              <span>{`${century}–${century + 99}`}</span>
+            </label>
+          ))
+        }
+      </div>
+      <p class="field__hint">
+        Hai chữ số không nói được năm thuộc thế kỷ nào; mã của năm 1998 và năm 2098 giống hệt nhau.
+        Trang mặc định {DEFAULT_CENTURY}&ndash;{DEFAULT_CENTURY + 99}, là khoảng các mã đang lưu hành.
+      </p>
+    </div>
+  </section>
+
+  <p class="output__error" id="code-error" role="alert" hidden></p>
+
+  <ul class="facts">
+    {
+      FACTS.map((fact) => (
+        <li class:list={["fact", fact.primary && "fact--primary"]}>
+          <div class="fact__head">
+            <span class="fact__label">{fact.label}</span>
+            <button
+              type="button"
+              class="btn btn--tiny"
+              data-copy={fact.id}
+              aria-label={`Sao chép ${fact.label.toLowerCase()}`}
+            >
+              <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              <span data-label>Chép</span>
+            </button>
+          </div>
+          <span class="fact__value" data-value={fact.id} data-empty="true">
+            &mdash;
+          </span>
+          <span class="fact__note" data-note={fact.id} />
+        </li>
+      ))
+    }
+  </ul>
+
+  <section class="card">
+    <div class="qc__head">
+      <h2 class="card__title">Tra ngược: một ngày thì mã bắt đầu bằng gì</h2>
+      <label class="qc__zone">
+        <span class="field__label">Độ dài mã</span>
+        <input
+          type="number"
+          id="build-length"
+          class="number-input"
+          min={DATE_DIGITS}
+          max={TX_CODE_MAX_DIGITS}
+          step="1"
+          value={TX_CODE_LENGTH}
+          inputmode="numeric"
+        />
+      </label>
+    </div>
+
+    <div class="qc">
+      <div class="qc__pane">
+        <div class="qc__title">
+          <label for="build-date">Ngày giao dịch</label>
+          <button type="button" class="btn btn--tiny" id="build-today">Hôm nay</button>
+        </div>
+        <input type="date" id="build-date" class="big-input" />
+        <p class="qc__note" id="build-note" role="status"></p>
+      </div>
+
+      <div class="qc__pane">
+        <div class="qc__title">
+          <span>Mã tương ứng</span>
+          <button type="button" class="btn btn--tiny" id="build-again">Đổi đuôi ngẫu nhiên</button>
+        </div>
+        {
+          BUILD_ROWS.map((row) => (
+            <div class="qc__out">
+              <span class="qc__label">{row.label}</span>
+              <span class="qc__value" data-out={row.id} data-empty="true">
+                &mdash;
+              </span>
+              <button
+                type="button"
+                class="copy-icon"
+                data-out-copy={row.id}
+                aria-label={`Sao chép ${row.label.toLowerCase()}`}
+                title="Sao chép"
+              >
+                <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+              </button>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Chỉ {DATE_DIGITS} chữ số đầu là tra ra được. Phần đuôi do hệ thống cấp mã sinh ra, nên
+      &ldquo;mã mẫu&rdquo; ở đây lấy đuôi ngẫu nhiên &mdash; dùng để thử hệ thống hoặc chụp màn hình,
+      không phải mã giao dịch có thật.
+    </p>
+  </section>
+
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="batch">Đọc hàng loạt &mdash; mỗi dòng một mã</label>
+      <span class="io__meta" id="batch-meta"></span>
+    </div>
+
+    <textarea
+      id="batch"
+      class="io__text"
+      style="--io-min-height:9rem"
+      rows="5"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      placeholder={`262641267307\n26264 1267307\n25100-0000001`}></textarea>
+
+    <div class="preset-row">
+      <button type="button" class="btn btn--tiny" id="batch-copy">
+        <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+        <span data-label>Chép kết quả</span>
+      </button>
+      <button type="button" class="btn btn--tiny" id="batch-clear">Xoá</button>
+    </div>
+
+    <p class="qc__note" id="batch-note" role="status" style="margin-top:0.6rem"></p>
+
+    <div class="table-wrap" id="batch-wrap" hidden style="margin-top:0.75rem">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Kết quả đọc từng mã giao dịch trong danh sách: ngày, thứ, ngày trong năm và phần số thứ tự.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Mã</th>
+            <th scope="col">Ngày</th>
+            <th scope="col">Thứ</th>
+            <th scope="col" class="sheet__num">Ngày trong năm</th>
+            <th scope="col">Số thứ tự</th>
+          </tr>
+        </thead>
+        <tbody id="batch-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title">Ngày trong năm của từng tháng</h2>
+
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Khoảng số thứ tự ngày trong năm của từng tháng, cho năm thường và năm nhuận.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Tháng</th>
+            <th scope="col" class="sheet__num">Số ngày</th>
+            <th scope="col" class="sheet__num">Năm thường</th>
+            <th scope="col" class="sheet__num">Năm nhuận</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            MONTH_TABLE.map((row) => (
+              <tr data-common={row.marked ? "" : undefined}>
+                <th scope="row" class="sheet__key">{row.name}</th>
+                <td class="sheet__num">{row.days}</td>
+                <td class="sheet__num">{row.common}</td>
+                <td class="sheet__num">{row.leap}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <p class="field__hint" style="margin-top:0.75rem">
+      Bảng được sinh ra từ chính phép tính mà công cụ ở trên dùng. Tháng 2 được tô đậm vì đó là chỗ
+      hai cột tách nhau: từ tháng 3 trở đi, năm nhuận lệch đúng một ngày so với năm thường.
+    </p>
+  </section>
+
+  <section class="card prose">
+    <h2>Mã giao dịch nói gì về ngày</h2>
+    <p>
+      Mã có dạng <code>YYDDD…</code>: hai chữ số đầu là năm, ba chữ số tiếp theo là <em>ngày thứ mấy
+      trong năm</em> &mdash; không phải ngày và tháng. Phần còn lại là số thứ tự do hệ thống cấp,
+      không mang thông tin thời gian.
+    </p>
+    <p>
+      Lấy chính ví dụ <code>{EXAMPLE.digits}</code>: <code>{EXAMPLE.yearDigits}</code> là năm{" "}
+      {EXAMPLE.year}, <code>{EXAMPLE.dayDigits}</code> là ngày thứ {EXAMPLE.dayOfYear} trong năm
+      {" "}{EXAMPLE.year}, tức {formatDate(EXAMPLE.date)} &mdash; {weekdayName(EXAMPLE).toLowerCase()}.
+      Bảy chữ số cuối, <code>{EXAMPLE.serial}</code>, là số thứ tự.
+    </p>
+    <p>
+      Cách đánh số ngày này là ngày thứ tự theo ISO 8601 (<i lang="en">ordinal date</i>), quen thuộc
+      với dân ngân hàng và hàng không dưới cái tên &ldquo;<i lang="en">Julian date</i>&rdquo; &mdash;
+      một tên gọi sai, vì nó không liên quan gì đến lịch Julius hay số ngày Julius trong thiên văn.
+    </p>
+
+    <h2>Hai chỗ dễ sai</h2>
+    <ul>
+      <li>
+        <strong>Năm nhuận.</strong> Ngày thứ 100 của năm 2026 là 10/4, nhưng của năm 2028 là 9/4:
+        từ tháng 3 trở đi, năm nhuận lệch đúng một ngày. Trang tự biết năm nào nhuận, còn khi nhẩm
+        tay thì đây là chỗ sai nhiều nhất.
+      </li>
+      <li>
+        <strong>Ngày 366.</strong> Chỉ năm nhuận mới có. Mã ghi <code>25366</code> là mã hỏng, vì
+        năm 2025 chỉ có 365 ngày &mdash; trang báo lỗi thay vì lặng lẽ trả về ngày 1/1 năm sau.
+      </li>
+    </ul>
+
+    <h2>Trang này làm gì và không làm gì</h2>
+    <p>
+      Mọi phép tính chạy ngay trong trình duyệt; mã bạn nhập không được gửi đi đâu. Trang chỉ đọc
+      phần ngày trong mã &mdash; nó không tra cứu giao dịch, không biết số tiền, tài khoản hay trạng
+      thái, và không kiểm tra được mã có thật hay không. Danh sách dán vào đọc tối đa{" "}
+      {TX_BATCH_LIMIT} mã mỗi lần.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    CENTURIES,
+    DATE_DIGITS,
+    DEFAULT_CENTURY,
+    TX_CODE_LENGTH,
+    TX_CODE_MAX_DIGITS,
+    daysBetween,
+    decodeLines,
+    decodeTxCode,
+    describeGap,
+    formatDate,
+    formatIso,
+    messageOf,
+    prefixFor,
+    sampleTxCode,
+    weekdayName,
+    type CivilDate,
+    type TxCode,
+  } from "../../lib/txcode";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-txcode";
+  const DEFAULTS = { century: DEFAULT_CENTURY, length: TX_CODE_LENGTH };
+
+  const codeInput = el<HTMLInputElement>("#code");
+  const codeMeta = el<HTMLElement>("#code-meta");
+  const codeError = el<HTMLElement>("#code-error");
+  const split = el<HTMLElement>("#split");
+
+  const buildDate = el<HTMLInputElement>("#build-date");
+  const buildLength = el<HTMLInputElement>("#build-length");
+  const buildNote = el<HTMLElement>("#build-note");
+
+  const batchInput = el<HTMLTextAreaElement>("#batch");
+  const batchMeta = el<HTMLElement>("#batch-meta");
+  const batchNote = el<HTMLElement>("#batch-note");
+  const batchWrap = el<HTMLElement>("#batch-wrap");
+  const batchRows = el<HTMLTableSectionElement>("#batch-rows");
+
+  /* ------------------------------------------------------------- tiny helpers */
+
+  const valueNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-value]").map((node) => [node.dataset["value"]!, node]),
+  );
+  const noteNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-note]").map((node) => [node.dataset["note"]!, node]),
+  );
+  const outNodes = new Map<string, HTMLElement>(
+    all<HTMLElement>("[data-out]").map((node) => [node.dataset["out"]!, node]),
+  );
+  /** What each copy button hands over — never the em dash a blank field shows. */
+  const copyable = new Map<string, string>();
+
+  function write(
+    nodes: Map<string, HTMLElement>,
+    id: string,
+    value: string | null,
+    note = "",
+  ): void {
+    const node = nodes.get(id);
+    if (value === null) copyable.delete(id);
+    else copyable.set(id, value);
+    if (!node) return;
+    node.textContent = value ?? "—";
+    if (value === null) node.dataset["empty"] = "true";
+    else delete node.dataset["empty"];
+    const noteNode = noteNodes.get(id);
+    if (noteNode) noteNode.textContent = note;
+  }
+
+  const fact = (id: string, value: string | null, note = "") => write(valueNodes, id, value, note);
+  const out = (id: string, value: string | null) => write(outNodes, id, value);
+
+  function status(node: HTMLElement, text: string, warn = false): void {
+    node.textContent = text;
+    if (warn) node.dataset["warn"] = "";
+    else delete node.dataset["warn"];
+  }
+
+  /** Today by the browser's own clock and zone — the date on the wall calendar. */
+  function today(): CivilDate {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  }
+
+  function century(): number {
+    const checked = el<HTMLInputElement>('input[name="century"]:checked');
+    return Number(checked.value);
+  }
+
+  function codeLength(): number {
+    const parsed = Number.parseInt(buildLength.value, 10);
+    if (!Number.isFinite(parsed)) return TX_CODE_LENGTH;
+    return Math.min(TX_CODE_MAX_DIGITS, Math.max(DATE_DIGITS, parsed));
+  }
+
+  function remember(): void {
+    savePrefs(PREFS_KEY, { century: century(), length: codeLength() });
+  }
+
+  /* ------------------------------------------------------------ decode one code */
+
+  const FACT_IDS = ["date", "weekday", "doy", "serial", "iso", "quarter", "week", "gap", "length"];
+
+  function clearFacts(): void {
+    for (const id of FACT_IDS) fact(id, null);
+    split.hidden = true;
+  }
+
+  function paintSplit(code: TxCode): void {
+    split.hidden = false;
+    const digits = split.querySelectorAll<HTMLElement>("[data-split]");
+    for (const node of digits) {
+      const part = node.dataset["split"]!;
+      const text =
+        part === "year" ? code.yearDigits : part === "day" ? code.dayDigits : code.serial;
+      node.textContent = text === "" ? "—" : text;
+      node.parentElement!.hidden = part === "serial" && text === "";
+    }
+    for (const node of split.querySelectorAll<HTMLElement>("[data-split-note]")) {
+      const part = node.dataset["splitNote"]!;
+      node.textContent =
+        part === "year"
+          ? `năm ${code.year}`
+          : part === "day"
+            ? `ngày ${code.dayOfYear} / ${code.daysInYear}`
+            : `${code.serial.length} chữ số`;
+    }
+  }
+
+  function runDecode(): void {
+    const raw = codeInput.value;
+    codeMeta.textContent = "";
+
+    if (raw.trim() === "") {
+      clearFacts();
+      codeError.hidden = true;
+      return;
+    }
+
+    let code: TxCode;
+    try {
+      code = decodeTxCode(raw, century());
+    } catch (error) {
+      clearFacts();
+      codeError.textContent = messageOf(error);
+      codeError.hidden = false;
+      return;
+    }
+
+    codeError.hidden = true;
+    codeMeta.textContent = `${code.digits.length} chữ số`;
+    paintSplit(code);
+
+    const gap = daysBetween(today(), code.date);
+    fact("date", formatDate(code.date), `${weekdayName(code)}, ${describeGap(gap)}`);
+    fact("weekday", weekdayName(code));
+    fact("doy", `${code.dayOfYear} / ${code.daysInYear}`, `ngày thứ ${code.dayOfYear} của năm ${code.year}`);
+    fact(
+      "serial",
+      code.serial === "" ? null : code.serial,
+      code.serial === "" ? "mã chỉ có phần ngày" : "do hệ thống cấp mã sinh ra",
+    );
+    fact("iso", formatIso(code.date));
+    fact("quarter", `Quý ${code.quarter}/${code.year}`);
+    fact("week", `${code.week.year}-W${String(code.week.week).padStart(2, "0")}`);
+    fact("gap", describeGap(gap), gap === 0 ? "" : `so với ${formatDate(today())}`);
+    fact(
+      "length",
+      `${code.digits.length} chữ số`,
+      code.digits.length === TX_CODE_LENGTH
+        ? `đúng dạng ${TX_CODE_LENGTH} chữ số thường gặp`
+        : `dạng thường gặp là ${TX_CODE_LENGTH} chữ số`,
+    );
+  }
+
+  /* ------------------------------------------------------------- date → prefix */
+
+  const BUILD_IDS = ["b-prefix", "b-sample", "b-doy", "b-weekday"];
+
+  function runBuild(): void {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(buildDate.value);
+    if (!match) {
+      for (const id of BUILD_IDS) out(id, null);
+      const empty = buildDate.value === "";
+      status(buildNote, empty ? "Hãy chọn một ngày." : "Ngày chưa đầy đủ.", !empty);
+      return;
+    }
+    const date = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+
+    try {
+      const prefix = prefixFor(date, century());
+      out("b-prefix", prefix);
+      out("b-sample", sampleTxCode(date, century(), codeLength()));
+      out("b-doy", `${Number(prefix.slice(2))} / ${decodeTxCode(prefix, century()).daysInYear}`);
+      out("b-weekday", weekdayName(decodeTxCode(prefix, century())));
+      status(buildNote, `Mọi mã phát sinh ngày ${formatDate(date)} đều bắt đầu bằng ${prefix}.`);
+    } catch (error) {
+      for (const id of BUILD_IDS) out(id, null);
+      status(buildNote, messageOf(error), true);
+    }
+  }
+
+  /* -------------------------------------------------------------------- batch */
+
+  function cell(text: string, className?: string, tag: "td" | "th" = "td"): HTMLTableCellElement {
+    const node = document.createElement(tag);
+    node.textContent = text;
+    if (className) node.className = className;
+    if (tag === "th") node.setAttribute("scope", "row");
+    return node;
+  }
+
+  /** Tab-separated, so it pastes straight into a spreadsheet column by column. */
+  let batchExport = "";
+
+  function runBatch(): void {
+    const raw = batchInput.value;
+    batchRows.replaceChildren();
+    batchExport = "";
+
+    if (raw.trim() === "") {
+      batchWrap.hidden = true;
+      batchMeta.textContent = "";
+      status(batchNote, "");
+      return;
+    }
+
+    let lines;
+    try {
+      lines = decodeLines(raw, century());
+    } catch (error) {
+      batchWrap.hidden = true;
+      batchMeta.textContent = "";
+      status(batchNote, messageOf(error), true);
+      return;
+    }
+
+    const rows: string[] = [];
+    let failed = 0;
+
+    for (const line of lines) {
+      const tr = document.createElement("tr");
+      if (line.code === null) {
+        failed += 1;
+        tr.append(cell(line.input, "sheet__key", "th"));
+        const problem = cell(line.error ?? "", "sheet__prose");
+        problem.colSpan = 4;
+        problem.dataset["problem"] = "";
+        tr.append(problem);
+      } else {
+        const code = line.code;
+        tr.append(
+          cell(code.digits, "sheet__key", "th"),
+          cell(formatDate(code.date)),
+          cell(weekdayName(code)),
+          cell(`${code.dayOfYear} / ${code.daysInYear}`, "sheet__num"),
+          cell(code.serial === "" ? "—" : code.serial),
+        );
+        rows.push(
+          [code.digits, formatDate(code.date), weekdayName(code), String(code.dayOfYear), code.serial].join("\t"),
+        );
+      }
+      batchRows.append(tr);
+    }
+
+    batchExport = rows.join("\n");
+    batchWrap.hidden = lines.length === 0;
+    batchMeta.textContent = `${lines.length} mã`;
+    status(
+      batchNote,
+      failed === 0
+        ? `Đọc được cả ${lines.length} mã.`
+        : `${lines.length - failed} mã đọc được, ${failed} mã lỗi.`,
+      failed > 0,
+    );
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+  if (CENTURIES.some((c) => c === prefs.century)) {
+    el<HTMLInputElement>(`input[name="century"][value="${prefs.century}"]`).checked = true;
+  }
+  buildLength.value = String(Math.min(TX_CODE_MAX_DIGITS, Math.max(DATE_DIGITS, prefs.length)));
+
+  codeInput.addEventListener("input", runDecode);
+
+  for (const radio of all<HTMLInputElement>('input[name="century"]')) {
+    radio.addEventListener("change", () => {
+      remember();
+      runDecode();
+      runBuild();
+      runBatch();
+    });
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      codeInput.value = button.dataset["preset"]!;
+      runDecode();
+    });
+  }
+
+  el<HTMLButtonElement>("#code-today").addEventListener("click", () => {
+    codeInput.value = sampleTxCode(today(), century(), codeLength());
+    runDecode();
+  });
+
+  buildDate.addEventListener("input", runBuild);
+  buildLength.addEventListener("input", () => {
+    remember();
+    runBuild();
+  });
+  el<HTMLButtonElement>("#build-today").addEventListener("click", () => {
+    buildDate.value = formatIso(today());
+    runBuild();
+  });
+  el<HTMLButtonElement>("#build-again").addEventListener("click", runBuild);
+
+  // Long pastes are common here, so the table is rebuilt on a trailing edge
+  // rather than on every keystroke.
+  let batchTimer: number | undefined;
+  batchInput.addEventListener("input", () => {
+    window.clearTimeout(batchTimer);
+    batchTimer = window.setTimeout(runBatch, 140);
+  });
+  el<HTMLButtonElement>("#batch-clear").addEventListener("click", () => {
+    batchInput.value = "";
+    runBatch();
+    batchInput.focus();
+  });
+  attachCopy(el<HTMLButtonElement>("#batch-copy"), () => batchExport);
+
+  for (const button of all<HTMLButtonElement>("[data-copy]")) {
+    const id = button.dataset["copy"]!;
+    attachCopy(button, () => copyable.get(id) ?? "");
+  }
+  for (const button of all<HTMLButtonElement>("[data-out-copy]")) {
+    const id = button.dataset["outCopy"]!;
+    attachCopy(button, () => copyable.get(id) ?? "");
+  }
+
+  buildDate.value = formatIso(today());
+  runDecode();
+  runBuild();
+</script>

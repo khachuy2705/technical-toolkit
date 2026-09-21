@@ -6,10 +6,11 @@ its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
-**YAML formatter**, **Unicode text spoofer**, **epoch converter**, **lunar calendar converter** (âm lịch), and a network
+**YAML formatter**, **Unicode text spoofer**, **epoch converter**, **lunar calendar converter** (âm lịch),
+**transaction code date decoder** (tra ngày từ mã giao dịch), and a network
 group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
 splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data
-formats, Date & time.
+formats, Date & time, Other.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -88,6 +89,7 @@ src/
 │   ├── openssl.ts       The same form, as a script you could have run instead
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
+│   ├── txcode.ts        Transaction codes that carry a year and a day of year
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
 │   ├── hash.ts          MD5 + SHA-256/512 over bytes

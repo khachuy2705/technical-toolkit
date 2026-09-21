@@ -10,7 +10,7 @@ import type { Lang } from './i18n';
 
 export type ToolStatus = 'live' | 'planned';
 
-export type ToolGroupId = 'network' | 'security' | 'data' | 'time';
+export type ToolGroupId = 'network' | 'security' | 'data' | 'time' | 'other';
 
 export interface ToolGroup {
   readonly id: ToolGroupId;
@@ -27,6 +27,9 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
   { id: 'security', name: 'Security', vi: 'Bảo mật' },
   { id: 'data', name: 'Data formats', vi: 'Định dạng dữ liệu' },
   { id: 'time', name: 'Date & time', vi: 'Ngày giờ' },
+  // Last on purpose: the catch-all for tools that answer one narrow question
+  // and have no sibling to sit beside.
+  { id: 'other', name: 'Other', vi: 'Khác' },
 ];
 
 /** A tool's own words, in one language. */
@@ -286,6 +289,32 @@ export const TOOLS: readonly Tool[] = [
     status: 'planned',
     group: 'security',
     vi: { name: 'Giải mã JWT', tagline: 'Xem header, payload và thời hạn.' },
+  },
+  {
+    slug: 'transaction-code-decoder',
+    name: 'Transaction Code Date Decoder',
+    tagline: 'The date hidden in the first five digits.',
+    description:
+      'Read the date out of a transaction reference whose first five digits are two digits of year and the ordinal day of that year. Decodes one code or a pasted list, and builds the prefix for any date.',
+    keywords: [
+      'ma giao dich',
+      'tra cuu ma giao dich',
+      'ma giao dich ngay nao',
+      'giai ma ma giao dich',
+      'transaction code date',
+      'julian date code',
+      'ordinal date',
+      'day of year',
+    ],
+    icon: '<path d="M8 2v4"/><path d="M16 2v4"/><path d="M21 11.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5.5"/><path d="M3 10h18"/><circle cx="17.5" cy="17.5" r="3.5"/><path d="m22 22-1.9-1.9"/>',
+    status: 'live',
+    group: 'other',
+    vi: {
+      name: 'Tra ngày từ mã giao dịch',
+      tagline: 'Ngày giao dịch nằm ngay trong năm chữ số đầu.',
+      description:
+        'Nhập mã giao dịch để biết giao dịch được thực hiện ngày nào: hai chữ số đầu là năm, ba chữ số tiếp theo là ngày thứ mấy trong năm. Đọc một mã hoặc cả danh sách dán vào, và tra ngược mã của một ngày bất kỳ.',
+    },
   },
 ];
 

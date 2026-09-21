@@ -11,6 +11,21 @@ import { md5 } from "../src/lib/md5";
 import { findErrorIndex, formatJson } from "../src/lib/jsonfmt";
 import { HIGHLIGHT_LIMIT, highlightJson, tokenizeJson } from "../src/lib/jsonhighlight";
 import { convertYaml } from "../src/lib/yamlfmt";
+import {
+  DATE_DIGITS,
+  TX_BATCH_LIMIT,
+  TX_CODE_MAX_DIGITS,
+  TxCodeError,
+  daysBetween,
+  decodeLines,
+  decodeTxCode,
+  describeGap,
+  formatDate,
+  formatIso,
+  prefixFor,
+  sampleTxCode,
+  weekdayName,
+} from "../src/lib/txcode";
 import { lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
   availableZones,
@@ -895,6 +910,121 @@ export async function runToolChecks(check: Check): Promise<void> {
     check("spelled the way it is said", spellLunar({ day: 7, month: 8, year: 2026, leap: false }) === "Mùng 7 tháng Tám năm Bính Ngọ", spellLunar({ day: 7, month: 8, year: 2026, leap: false }));
     check("with Giêng, Chạp and nhuận", spellLunar({ day: 1, month: 1, year: 2025, leap: false }) === "Mùng 1 tháng Giêng năm Ất Tỵ" && spellLunar({ day: 23, month: 12, year: 2025, leap: false }) === "Ngày 23 tháng Chạp năm Ất Tỵ" && spellLunar({ day: 15, month: 6, year: 2025, leap: true }) === "Ngày 15 tháng Sáu nhuận năm Ất Tỵ");
     check("17/9/2026 is 7/8 Bính Ngọ", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })) === "7/8/2026", formatLunar(solarToLunar({ day: 17, month: 9, year: 2026 })));
+  }
+
+  console.log("\n-- transaction code --");
+  {
+    // The code the tool was built for, pinned field by field. 21/09/2026 is a
+    // Monday and day 264 of a common year; every other check leans on this one.
+    const example = decodeTxCode("262641267307");
+    check("262641267307 is 21/09/2026", formatDate(example.date) === "21/09/2026", formatDate(example.date));
+    check("read as year 2026, day 264 of 365", example.year === 2026 && example.dayOfYear === 264 && example.daysInYear === 365, `${example.year}/${example.dayOfYear}/${example.daysInYear}`);
+    check("the serial is the seven digits after the date", example.serial === "1267307", example.serial);
+    check("and it was a Thứ Hai in quý 3, tuần 2026-W39", weekdayName(example) === "Thứ Hai" && example.quarter === 3 && example.week.year === 2026 && example.week.week === 39, `${weekdayName(example)} Q${example.quarter} ${example.week.year}-W${example.week.week}`);
+    check("the ISO form agrees", formatIso(example.date) === "2026-09-21", formatIso(example.date));
+
+    // A code with no serial at all is still a date, and is exactly what
+    // `prefixFor` produces, so the two functions have to meet here.
+    const bare = decodeTxCode("26264");
+    check("a bare five-digit code decodes with an empty serial", bare.serial === "" && formatDate(bare.date) === "21/09/2026", `${bare.serial}|${formatDate(bare.date)}`);
+
+    // Separators: codes get written down spaced, dotted and dashed.
+    const SPACED = ["26264 1267307", "26264-1267307", "26.264.1267307", " 2626/4126 7307 ", "26,264,1267307", "26264|1267307"];
+    check("separators are stripped", SPACED.every((text) => decodeTxCode(text).digits === "262641267307"), SPACED.find((t) => decodeTxCode(t).digits !== "262641267307") ?? "");
+
+    // The leap day is the whole reason this cannot be done by eye: from March
+    // on, the same ordinal names a different date in a leap year.
+    check("day 60 is 1/3 in a common year", formatDate(decodeTxCode("26060").date) === "01/03/2026", formatDate(decodeTxCode("26060").date));
+    check("day 60 is 29/2 in a leap year", formatDate(decodeTxCode("28060").date) === "29/02/2028", formatDate(decodeTxCode("28060").date));
+    check("day 366 exists in 2024", formatDate(decodeTxCode("24366").date) === "31/12/2024", formatDate(decodeTxCode("24366").date));
+    check("001 is the first of January", formatDate(decodeTxCode("26001").date) === "01/01/2026", formatDate(decodeTxCode("26001").date));
+    check("365 is the last day of a common year", formatDate(decodeTxCode("26365").date) === "31/12/2026", formatDate(decodeTxCode("26365").date));
+
+    // Two digits of year name a year only once a century is assumed, and the
+    // page lets that be chosen. Same five digits, three different dates.
+    check("the century is applied, not assumed", formatDate(decodeTxCode("99001", 1900).date) === "01/01/1999" && formatDate(decodeTxCode("99001", 2000).date) === "01/01/2099" && formatDate(decodeTxCode("99001", 2100).date) === "01/01/2199", formatDate(decodeTxCode("99001", 1900).date));
+    check("1900 is a common year but 2000 is not", decodeTxCode("00365", 1900).daysInYear === 365 && decodeTxCode("00366", 2000).daysInYear === 366, `${decodeTxCode("00365", 1900).daysInYear}/${decodeTxCode("00366", 2000).daysInYear}`);
+
+    // Every day of a whole century, out through the prefix and back. This pins
+    // the two directions to each other rather than to a handful of fixtures.
+    let mismatch: string | null = null;
+    let counted = 0;
+    for (let year = 2000; year <= 2099 && mismatch === null; year += 1) {
+      const length = isLeapYear(year) ? 366 : 365;
+      for (let ordinal = 1; ordinal <= length; ordinal += 1) {
+        const date = civilFromDays(daysFromCivil(year, 1, 1) + ordinal - 1);
+        const prefix = prefixFor(date);
+        const back = decodeTxCode(prefix);
+        counted += 1;
+        if (prefix !== `${String(year - 2000).padStart(2, "0")}${String(ordinal).padStart(3, "0")}`) {
+          mismatch = `${formatDate(date)} built ${prefix}`;
+          break;
+        }
+        if (formatIso(back.date) !== formatIso(date) || back.dayOfYear !== ordinal) {
+          mismatch = `${formatDate(date)} came back as ${formatDate(back.date)}`;
+          break;
+        }
+      }
+    }
+    check(`every day of 2000-2099 round-trips (${counted.toLocaleString("en-US")} days)`, mismatch === null, mismatch ?? "");
+
+    // Refusals, each by name. The page shows only TxCodeError messages
+    // verbatim, so the type is part of the check.
+    const TX_REFUSED: readonly [string, () => unknown, RegExp][] = [
+      ["an empty input", () => decodeTxCode("   "), /Hãy nhập mã giao dịch/],
+      ["a stray letter", () => decodeTxCode("26264X1267307"), /ký tự “X”/],
+      ["a code shorter than the date", () => decodeTxCode("2626"), /ít nhất 5 chữ số/],
+      ["an absurdly long code", () => decodeTxCode("2".repeat(33)), /vượt quá 32/],
+      ["day 000", () => decodeTxCode("26000"), /đánh số từ 001/],
+      ["day 366 of a common year", () => decodeTxCode("25366"), /năm 2025 chỉ có 365 ngày/],
+      ["day 367 of a leap year", () => decodeTxCode("24367"), /năm 2024 chỉ có 366 ngày \(năm nhuận\)/],
+      ["a year outside the chosen century", () => prefixFor({ year: 1998, month: 1, day: 1 }), /ngoài thế kỷ 2000–2099/],
+      ["a sample code shorter than the date", () => sampleTxCode({ year: 2026, month: 9, day: 21 }, 2000, 4), /từ 5 đến 32/],
+    ];
+    for (const [name, attempt, message] of TX_REFUSED) {
+      let said = "";
+      let typed = false;
+      try { attempt(); } catch (error) { said = (error as Error).message; typed = error instanceof TxCodeError; }
+      check(`refuses ${name}`, message.test(said) && typed, said || "(accepted)");
+    }
+
+    // The generated sample is only useful if it decodes back to the day asked
+    // for, at whatever length the page is set to.
+    const day = { year: 2026, month: 9, day: 21 };
+    let sampleBroken: string | null = null;
+    for (let length = DATE_DIGITS; length <= TX_CODE_MAX_DIGITS && sampleBroken === null; length += 1) {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const code = sampleTxCode(day, 2000, length);
+        if (code.length !== length) sampleBroken = `asked ${length}, got ${code.length}: ${code}`;
+        else if (!/^\d+$/.test(code)) sampleBroken = `not all digits: ${code}`;
+        else if (formatIso(decodeTxCode(code).date) !== "2026-09-21") sampleBroken = `decoded elsewhere: ${code}`;
+        if (sampleBroken !== null) break;
+      }
+    }
+    check("a sample code of any length decodes back to its own date", sampleBroken === null, sampleBroken ?? "");
+    check("and its tail actually varies", new Set(Array.from({ length: 40 }, () => sampleTxCode(day))).size > 35);
+
+    // A pasted list: good lines decode, bad lines carry their reason, blank
+    // lines are skipped rather than counted as failures.
+    const lines = decodeLines("262641267307\n\n  26264-1267307  \nxx\n25366\n");
+    check("a pasted list skips blank lines", lines.length === 4, String(lines.length));
+    check("good lines decode", lines[0]?.code?.dayOfYear === 264 && lines[1]?.code?.dayOfYear === 264, JSON.stringify(lines.map((l) => l.code?.dayOfYear ?? null)));
+    check("bad lines carry a reason and no code", lines[2]?.code === null && /ký tự/.test(lines[2]?.error ?? "") && lines[3]?.code === null && /365 ngày/.test(lines[3]?.error ?? ""), `${lines[2]?.error} | ${lines[3]?.error}`);
+    let batchSaid = "";
+    let batchTyped = false;
+    try { decodeLines(Array.from({ length: TX_BATCH_LIMIT + 1 }, () => "26264").join("\n")); } catch (error) { batchSaid = (error as Error).message; batchTyped = error instanceof TxCodeError; }
+    check(`refuses more than ${TX_BATCH_LIMIT} codes at once`, /tối đa 500 mã/.test(batchSaid) && batchTyped, batchSaid || "(accepted)");
+
+    // The wording the page puts under the date. Exact days, never rounded.
+    check("gaps are worded in Vietnamese", describeGap(0) === "hôm nay" && describeGap(-1) === "hôm qua" && describeGap(1) === "ngày mai", [describeGap(0), describeGap(-1), describeGap(1)].join("|"));
+    check("and counted exactly either way", describeGap(-1234) === "cách đây 1.234 ngày" && describeGap(30) === "còn 30 ngày nữa", `${describeGap(-1234)} | ${describeGap(30)}`);
+    check("days between two dates are signed", daysBetween({ year: 2026, month: 9, day: 21 }, { year: 2026, month: 9, day: 24 }) === 3 && daysBetween({ year: 2026, month: 9, day: 24 }, { year: 2026, month: 9, day: 21 }) === -3);
+
+    // Published reference data: the page renders a month table at build time,
+    // so a regression would hand every visitor a wrong lookup.
+    check("March starts at 060 in a common year and 061 in a leap one", dayOfYear(2026, 3, 1) === 60 && dayOfYear(2028, 3, 1) === 61, `${dayOfYear(2026, 3, 1)}/${dayOfYear(2028, 3, 1)}`);
+    check("February ends at 059 and 060", dayOfYear(2026, 2, 28) === 59 && dayOfYear(2028, 2, 29) === 60);
+    check("the year ends at 365 and 366", dayOfYear(2026, 12, 31) === 365 && dayOfYear(2028, 12, 31) === 366);
   }
 
   console.log("\n-- json highlighting --");

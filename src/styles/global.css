@@ -2012,3 +2012,88 @@ select {
   overflow-x: auto;
   user-select: all;
 }
+
+/* ---------------------------------------------------------------------------
+   Transaction code breakdown
+
+   The whole point of the tool is that the first five digits are two fields, so
+   the code is shown cut into its parts with each part's meaning under it. The
+   three parts keep distinct colours from the syntax palette, which already
+   clears contrast on both themes.
+--------------------------------------------------------------------------- */
+
+.txsplit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.txsplit[hidden] {
+  display: none;
+}
+
+.txsplit__part {
+  --part: var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  border-bottom: 3px solid var(--part);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.txsplit__part[hidden] {
+  display: none;
+}
+
+/* The serial carries no date, so it is the one part drawn as background. */
+.txsplit__part[data-part="year"] {
+  --part: var(--syn-key);
+}
+
+.txsplit__part[data-part="day"] {
+  --part: var(--accent);
+}
+
+.txsplit__part[data-part="serial"] {
+  --part: var(--border-strong);
+  flex-shrink: 1;
+}
+
+.txsplit__digits {
+  font-family: var(--font-mono);
+  font-size: clamp(1.25rem, 4vw, 1.75rem);
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: var(--part);
+  word-break: break-all;
+  user-select: all;
+}
+
+.txsplit__part[data-part="serial"] .txsplit__digits {
+  color: var(--text-muted);
+}
+
+.txsplit__label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.txsplit__meaning {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* A line of the batch list that did not decode: its reason spans the columns
+   the date would have filled. */
+.sheet td[data-problem] {
+  color: var(--strength-0);
+}
