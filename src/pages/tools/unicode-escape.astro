@@ -1,0 +1,273 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import IoPanel from "../../components/IoPanel.astro";
+import { ESCAPE_INPUT_LIMIT } from "../../lib/escape";
+---
+
+<ToolLayout slug="unicode-escape">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <span class="field__label">Direction</span>
+        <div class="segmented" role="radiogroup" aria-label="Direction">
+          <label>
+            <input type="radio" name="mode" value="decode" checked />
+            <span>Decode</span>
+          </label>
+          <label>
+            <input type="radio" name="mode" value="encode" />
+            <span>Escape</span>
+          </label>
+        </div>
+        <p class="field__hint">
+          Decode turns <code>ô</code> into <code>ô</code>. Escape does the reverse, so the
+          text can sit in a file that only accepts ASCII.
+        </p>
+      </div>
+
+      <fieldset class="field field--plain" id="decode-options">
+        <legend class="field__label">Decoding</legend>
+        <label class="check">
+          <input type="checkbox" id="trim-quotes" checked />
+          <span class="check__text">
+            Drop surrounding quotes
+            <span class="check__sample">Only when the first and last character are the same quote</span>
+          </span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="keep-unknown" checked />
+          <span class="check__text">
+            Keep meaningless sequences
+            <span class="check__sample">\d stays \d instead of failing the whole input</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <fieldset class="field field--plain" id="encode-options" hidden>
+        <legend class="field__label">Escaping</legend>
+        <div class="segmented" role="radiogroup" aria-label="Escape style">
+          <label>
+            <input type="radio" name="style" value="unit" checked />
+            <span>\uXXXX</span>
+          </label>
+          <label>
+            <input type="radio" name="style" value="codepoint" />
+            <span>\u&#123;XXXXX&#125;</span>
+          </label>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="escape-quotes" checked />
+          <span class="check__text">
+            Escape quotes and backslashes
+            <span class="check__sample">Needed before the result goes inside a string literal</span>
+          </span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="wrap-quotes" />
+          <span class="check__text">
+            Wrap in double quotes
+            <span class="check__sample">Gives a complete JSON string</span>
+          </span>
+        </label>
+      </fieldset>
+    </div>
+  </section>
+
+  <IoPanel placeholder={'Paste "Kh\\u00f4ng t\\u1ed3n t\\u1ea1i kh\\u00e1ch h\\u00e0ng!" here…'} swappable />
+
+  <section class="card prose">
+    <h2>Where these strings come from</h2>
+    <p>
+      A JSON encoder is allowed to write any character above ASCII as a <code>\uXXXX</code> escape,
+      and many do it by default — Java's Jackson with <code>ESCAPE_NON_ASCII</code>, Python's
+      <code>json.dumps</code> unless you pass <code>ensure_ascii=False</code>, PHP's
+      <code>json_encode</code> without <code>JSON_UNESCAPED_UNICODE</code>. The result is valid
+      JSON and means exactly the same thing, but a log line full of
+      <code>Không tồn tại</code> is unreadable at a glance. Paste it here to get the
+      sentence back.
+    </p>
+
+    <h2>What the decoder reads</h2>
+    <ul>
+      <li><code>\uXXXX</code> — four hex digits, one UTF-16 code unit.</li>
+      <li><code>\u&#123;XXXXX&#125;</code> — one code point, up to <code>\u&#123;10FFFF&#125;</code>.</li>
+      <li><code>\xNN</code> — two hex digits, up to <code>\xFF</code>.</li>
+      <li><code>\n \r \t \b \f \v \0</code> and <code>\\ \" \' \` \/</code>.</li>
+    </ul>
+    <p>
+      Anything else is left exactly as written, and the count is reported — or, with
+      <em>Keep meaningless sequences</em> off, reported as an error with the line and column, which
+      is what you want when the input is supposed to be strict JSON. Text outside an escape is
+      copied through untouched, so a config file with a few escapes in it decodes without being
+      reformatted around them.
+    </p>
+
+    <h2>Emoji and surrogate pairs</h2>
+    <p>
+      Characters above U+FFFF are stored as two UTF-16 code units, which is why an emoji arrives as
+      a pair like <code>😀</code>. The decoder joins the pair back into 😀 rather than
+      producing two broken halves. Escaping does the same in reverse; choose
+      <code>\u&#123;XXXXX&#125;</code> if the target language reads code points directly.
+    </p>
+    <p>
+      A <code>\uD83D</code> with no partner is reported as a lone surrogate. It is a legal
+      JavaScript string but cannot be written as UTF-8, so saving or sending it would turn it into
+      a replacement character. Usually it means the input was cut in half somewhere upstream.
+    </p>
+
+    <h2>This is not URL or HTML decoding</h2>
+    <p>
+      <code>%C3%B4</code> is percent-encoding and <code>&amp;#244;</code> is an HTML entity. Neither
+      is a backslash escape, and neither is touched here. Nothing you paste is sent anywhere; the
+      whole conversion happens in this page, on up to {ESCAPE_INPUT_LIMIT.toLocaleString("en-US")}
+      characters at a time.
+    </p>
+  </section>
+</ToolLayout>
+
+<style>
+  .field--plain {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-inline-size: 0;
+  }
+  .field--plain legend {
+    padding: 0;
+  }
+  .field--plain .segmented {
+    margin-bottom: 0.75rem;
+  }
+</style>
+
+<script>
+  import {
+    DEFAULT_ESCAPE_OPTIONS,
+    DEFAULT_UNESCAPE_OPTIONS,
+    EscapeError,
+    escapeText,
+    unescapeText,
+    type EscapeStyle,
+  } from "../../lib/escape";
+  import { fail, lineColumn, ok, type FormatResult } from "../../lib/format";
+  import { attachTextIo } from "../../lib/textio";
+  import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-unicode-escape";
+
+  const modeRadios = all<HTMLInputElement>('input[name="mode"]');
+  const styleRadios = all<HTMLInputElement>('input[name="style"]');
+  const trimQuotes = el<HTMLInputElement>("#trim-quotes");
+  const keepUnknown = el<HTMLInputElement>("#keep-unknown");
+  const escapeQuotes = el<HTMLInputElement>("#escape-quotes");
+  const wrapQuotes = el<HTMLInputElement>("#wrap-quotes");
+  const decodeOptions = el<HTMLFieldSetElement>("#decode-options");
+  const encodeOptions = el<HTMLFieldSetElement>("#encode-options");
+  const inputLabel = el<HTMLLabelElement>('label[for="io-input"]');
+  const outputLabel = el<HTMLLabelElement>('label[for="io-output"]');
+
+  const DEFAULTS = {
+    mode: "decode",
+    style: DEFAULT_ESCAPE_OPTIONS.style,
+    trimQuotes: DEFAULT_UNESCAPE_OPTIONS.trimQuotes,
+    keepUnknown: DEFAULT_UNESCAPE_OPTIONS.keepUnknown,
+    escapeQuotes: DEFAULT_ESCAPE_OPTIONS.quotes,
+    wrapQuotes: DEFAULT_ESCAPE_OPTIONS.wrap,
+  };
+
+  const prefs = loadPrefs(PREFS_KEY, DEFAULTS);
+  for (const radio of modeRadios) radio.checked = radio.value === prefs.mode;
+  if (!modeRadios.some((r) => r.checked)) modeRadios[0]!.checked = true;
+  for (const radio of styleRadios) radio.checked = radio.value === prefs.style;
+  if (!styleRadios.some((r) => r.checked)) styleRadios[0]!.checked = true;
+  trimQuotes.checked = prefs.trimQuotes !== false;
+  keepUnknown.checked = prefs.keepUnknown !== false;
+  escapeQuotes.checked = prefs.escapeQuotes !== false;
+  wrapQuotes.checked = prefs.wrapQuotes === true;
+
+  const decoding = () => (modeRadios.find((r) => r.checked)?.value ?? "decode") === "decode";
+  const style = (): EscapeStyle =>
+    (styleRadios.find((r) => r.checked)?.value as EscapeStyle | undefined) ?? "unit";
+
+  const DECODE_SAMPLE = '"Kh\\u00f4ng t\\u1ed3n t\\u1ea1i kh\\u00e1ch h\\u00e0ng!"';
+  const ENCODE_SAMPLE = "Không tồn tại khách hàng!";
+
+  /** Plain-language tail for the output meta line. */
+  function count(n: number, one: string, many = `${one}s`): string {
+    return `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+  }
+
+  const io = attachTextIo({
+    downloadName: "unicode-escape.txt",
+    get sample() {
+      return decoding() ? DECODE_SAMPLE : ENCODE_SAMPLE;
+    },
+    transform(input): FormatResult {
+      try {
+        if (!decoding()) {
+          const result = escapeText(input, {
+            style: style(),
+            quotes: escapeQuotes.checked,
+            wrap: wrapQuotes.checked,
+          });
+          return ok(result.output, `${count(result.escaped, "character")} escaped`);
+        }
+
+        const result = unescapeText(input, {
+          trimQuotes: trimQuotes.checked,
+          keepUnknown: keepUnknown.checked,
+        });
+        const notes = [`${count(result.decoded, "escape")} decoded`];
+        if (result.quotesTrimmed) notes.push("quotes dropped");
+        if (result.unknown > 0) notes.push(`${count(result.unknown, "sequence")} left as written`);
+        if (result.loneSurrogates > 0) {
+          notes.push(`${count(result.loneSurrogates, "lone surrogate")} — not valid UTF-8`);
+        }
+        return ok(result.output, notes.join(" · "));
+      } catch (error) {
+        if (error instanceof EscapeError && error.index > 0) {
+          const { line, column } = lineColumn(input, error.index);
+          return fail(`${error.message} (line ${line}, column ${column})`);
+        }
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+    },
+  });
+
+  function save(): void {
+    savePrefs(PREFS_KEY, {
+      mode: decoding() ? "decode" : "encode",
+      style: style(),
+      trimQuotes: trimQuotes.checked,
+      keepUnknown: keepUnknown.checked,
+      escapeQuotes: escapeQuotes.checked,
+      wrapQuotes: wrapQuotes.checked,
+    });
+  }
+
+  /** Only one direction's options mean anything at a time; the other is hidden. */
+  function syncMode(): void {
+    const decode = decoding();
+    decodeOptions.hidden = !decode;
+    encodeOptions.hidden = decode;
+    inputLabel.textContent = decode ? "Escaped text" : "Text";
+    outputLabel.textContent = decode ? "Text" : "Escaped text";
+  }
+
+  for (const control of modeRadios) {
+    control.addEventListener("change", () => {
+      syncMode();
+      save();
+      io.run();
+    });
+  }
+  for (const control of [...styleRadios, trimQuotes, keepUnknown, escapeQuotes, wrapQuotes]) {
+    control.addEventListener("change", () => {
+      save();
+      io.run();
+    });
+  }
+
+  syncMode();
+  io.run();
+</script>

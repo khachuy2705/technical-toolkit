@@ -71,6 +71,30 @@ export const TOOLS: readonly Tool[] = [
     vi: { name: 'Thay ký tự Unicode', tagline: 'Ký tự trông giống nhau, đối chiếu từng mã Unicode.' },
   },
   {
+    slug: 'unicode-escape',
+    name: 'Unicode Escape Converter',
+    tagline: 'Read \\u00f4 as ô, and write it back.',
+    description:
+      'Decode \\uXXXX, \\u{XXXXX} and \\xNN escape sequences back into readable text, or escape any text so it survives a source file that only accepts ASCII. Surrogate pairs and emoji are handled correctly.',
+    keywords: [
+      'unicode escape',
+      'unescape unicode',
+      'u00e0 converter',
+      'json unescape',
+      'decode unicode escape',
+      'giai ma unicode',
+      'chuyen doi chuoi unicode',
+      'escape sequence converter',
+    ],
+    icon: '<rect width="4" height="6" x="14" y="14" rx="2"/><rect width="4" height="6" x="6" y="4" rx="2"/><path d="M6 20h4"/><path d="M14 10h4"/><path d="M6 14h2v6"/><path d="M14 4h2v6"/>',
+    status: 'live',
+    group: 'data',
+    vi: {
+      name: 'Chuyển đổi chuỗi Unicode escape',
+      tagline: 'Đọc \\u00f4 thành ô, và ngược lại.',
+    },
+  },
+  {
     slug: 'password-generator',
     name: 'Password Generator',
     tagline: 'Random passwords with a live strength readout.',

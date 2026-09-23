@@ -6,7 +6,8 @@ its own origin, and none of them carries anything you typed.
 
 Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
-**YAML formatter**, **Unicode text spoofer**, **epoch converter**, **lunar calendar converter** (âm lịch),
+**YAML formatter**, **Unicode text spoofer**, **Unicode escape converter** (\u00f4 to ô),
+**epoch converter**, **lunar calendar converter** (âm lịch),
 **transaction code date decoder** (tra ngày từ mã giao dịch), and a network
 group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
 splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data
@@ -91,6 +92,7 @@ src/
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── txcode.ts        Transaction codes that carry a year and a day of year
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
+│   ├── escape.ts        \uXXXX escape sequences, both directions
 │   ├── md5.ts           Hand-written MD5 (WebCrypto will not do it)
 │   ├── hash.ts          MD5 + SHA-256/512 over bytes
 │   ├── jsonfmt.ts       Format/minify/sort, with an engine-independent

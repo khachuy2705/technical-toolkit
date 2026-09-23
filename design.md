@@ -76,6 +76,7 @@ src/
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
 │   ├── txcode.ts          Transaction codes: year + day of year → a date
 │   ├── unicode.ts         Grapheme-safe homoglyph substitution and change records
+│   ├── escape.ts          \uXXXX, \u{…} and \xNN escapes, decode and encode
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
 │   ├── md5.ts             Hand-written MD5 — WebCrypto will not do it
 │   ├── hash.ts            MD5 + SHA-256/512 over bytes
@@ -853,6 +854,38 @@ and 29 February in a leap one.
   two columns part company.
 - Only the century and the sample length are stored (`tt-txcode`). No code is ever persisted.
 
+### 6.19 Unicode escape converter — `/tools/unicode-escape/`
+
+Two panes and one direction switch. Decoding turns `"Kh\u00f4ng t\u1ed3n t\u1ea1i"` back into a
+sentence; escaping writes any text as ASCII-only escape sequences. `lib/escape.ts` is pure, and
+throws `EscapeError` carrying the offset into the caller's own string, which the page renders as a
+line and column through `lineColumn` (§8.4 uses the same helper for JSON).
+
+- The decoder reads `\uXXXX`, `\u{XXXXX}` (refused above U+10FFFF), `\xNN`, `\0` and the
+  shorthands `\n \r \t \b \f \v \ \" \' \` \/`. `\uXXXX` is decoded as a **code unit**, not a
+  code point, which is what joins `\uD83D\uDE00` back into one emoji. `\0` is NUL only when no
+  digit follows it — otherwise it is a legacy octal escape this tool does not claim to read.
+- `\a` is deliberately **not** a bell. It is one in C and Python but a plain `a` in JavaScript, and
+  silently turning `\already` into a control character would be a trap.
+- Text outside a sequence is copied through byte for byte, so a config file with a few escapes in
+  it decodes without being reformatted around them.
+- Two decoder options: dropping one *matching* pair of surrounding quotes (a lone leading quote is
+  kept, and an escaped closing quote is not mistaken for the end), and keeping meaningless
+  sequences such as `\d` as written. Turning the second off makes the tool strict about what JSON
+  actually allows, and reports the first offender with its position.
+- Unpaired surrogates are counted and named in the output note. They are legal in a JavaScript
+  string but cannot be encoded as UTF-8, so saving or sending one would silently produce U+FFFD —
+  usually it means the input was cut in half upstream.
+- The encoder escapes everything outside printable ASCII, prefers `\n`-style shorthands for the
+  control characters that have them, and offers surrogate pairs or `\u{…}` for astral characters,
+  optional quote/backslash escaping and optional wrapping into a complete JSON string.
+- Input is capped at 200,000 characters in both directions, with an error rather than truncation.
+- Only the six option values are stored (`tt-unicode-escape`); input and output are never
+  persisted.
+- Checks in `verify-tools.ts` pin the decode of a real Vietnamese payload, surrogate joining,
+  quote handling, strict-mode refusals with their offsets, the encoder's output for both styles,
+  and a round-trip whose escaped form is also parsed by `JSON.parse` as an oracle.
+
 ---
 
 ## 7. Design system
@@ -1033,7 +1066,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 751 checks, Node, no browser
+npm run verify   # 791 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -1060,6 +1093,11 @@ npm run build    # runs check first, then the static build
 - **Base64** — ASCII and non-ASCII round-trips, agreement with Node's Base64, URL-safe output and
   cross-alphabet decoding, tolerance of wrapping and missing padding, rejection of invalid input,
   and that binary payloads are reported rather than turned into mojibake.
+- **Unicode escapes** — a JSON-escaped Vietnamese string decoded to the sentence it stands for,
+  surrogate pairs joining into one emoji, `\0` and `\a` behaving as documented, quote trimming only
+  on a real pair, strict mode refusing four malformed sequences and reporting the offset into the
+  original input, both encoder styles, and a round-trip whose escaped form `JSON.parse` agrees
+  with.
 - **JSON** — pretty/minify/sort/tab output, seven pinned error offsets (§8.4), that array order
   survives sorting, and that JSON5-isms (trailing commas, unquoted keys, comments) are rejected.
 - **YAML** — all three modes, indent and sort options, multi-document streams, error location, and
@@ -1344,7 +1382,7 @@ Asked and answered before building §6.14:
 | Area | What |
 |---|---|
 | Generators | Password and passphrase generators, entropy readout, bulk mode |
-| Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes |
+| Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes, Unicode escape converter |
 | Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
 | Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
 | Certificates | Root CA, CA-signed certificates and CSRs; purpose-driven key usage and EKU; PEM, PKCS#12 and JKS export |

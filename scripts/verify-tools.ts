@@ -5,6 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { DEFAULT_SPOOF_OPTIONS, UNICODE_INPUT_LIMIT, UNICODE_CHANGE_LIMIT, spoofUnicode, unicodeCodePoints } from "../src/lib/unicode";
+import { ESCAPE_INPUT_LIMIT, EscapeError, escapeText, unescapeText } from "../src/lib/escape";
 import { decodeBase64, encodeBase64, bytesToBase64, base64ToBytes } from "../src/lib/base64";
 import { hashBytes, hashText, toHex } from "../src/lib/hash";
 import { md5 } from "../src/lib/md5";
@@ -172,6 +173,82 @@ export async function runToolChecks(check: Check): Promise<void> {
     check("oversized input is refused rather than truncated", refused);
     check("empty input has no changes", spoofUnicode("", DEFAULT_SPOOF_OPTIONS).changes.length === 0);
   }
+  console.log("\n-- unicode escape --");
+  {
+    const loose = { trimQuotes: true, keepUnknown: true };
+    const strict = { trimQuotes: false, keepUnknown: false };
+
+    const vietnamese = unescapeText('"Kh\\u00f4ng t\\u1ed3n t\\u1ea1i kh\\u00e1ch h\\u00e0ng!"', loose);
+    check("decodes a JSON-escaped Vietnamese string", vietnamese.output === "Không tồn tại khách hàng!", vietnamese.output);
+    check("counts the escapes and the dropped quotes", vietnamese.decoded === 5 && vietnamese.quotesTrimmed, String(vietnamese.decoded));
+    check("text outside an escape is copied through", unescapeText("a\\u0062c <tag> & 100%", strict).output === "abc <tag> & 100%");
+    check("quotes are dropped only in a matching pair", unescapeText('"a', loose).output === '"a' && unescapeText("'a'", loose).output === "a");
+    check("an escaped closing quote is not mistaken for the end", unescapeText('"a\\""', loose).output === 'a"');
+    check("quote dropping can be turned off", unescapeText('"a"', strict).output === '"a"');
+    check("joins a surrogate pair into one character", unescapeText("\\uD83D\\uDE00", strict).output === "😀");
+    check("reads \\u{...} code points", unescapeText("\\u{1F600}\\u{41}", strict).output === "😀A");
+    check("reads \\xNN bytes", unescapeText("caf\\xe9", strict).output === "café");
+    check("reads the one-letter shorthands", unescapeText("a\\nb\\tc\\\\d\\\"e\\/f", strict).output === 'a\nb\tc\\d"e/f');
+    check("\\0 is NUL only on its own", unescapeText("\\0", strict).output === "\0" && unescapeText("\\07", loose).output === "\\07");
+    check("\\a stays literal, as it is in JavaScript", unescapeText("\\already", loose).output === "\\already");
+    const unknown = unescapeText("\\d\\u00e9\\q", loose);
+    check("meaningless sequences are kept and counted", unknown.output === "\\dé\\q" && unknown.unknown === 2 && unknown.decoded === 1);
+    check("a lone backslash at the end survives", unescapeText("end\\", loose).output === "end\\");
+    check("case of the hex digits does not matter", unescapeText("\\u00E9\\u00e9", strict).output === "éé");
+    check("counts unpaired surrogates", unescapeText("\\uD83D a \\uDE00", strict).loneSurrogates === 2);
+    check("a joined pair is not counted as lone", unescapeText("\\uD83D\\uDE00", strict).loneSurrogates === 0);
+
+    const refusals: [string, string][] = [
+      ["\\u00g4", "short hex"],
+      ["\\u12", "truncated escape"],
+      ["\\q", "unknown sequence"],
+      ["\\u{}", "empty braces"],
+    ];
+    for (const [input, label] of refusals) {
+      let refused = false;
+      try { unescapeText(input, strict); } catch (error) { refused = error instanceof EscapeError; }
+      check(`strict mode refuses ${label}`, refused, input);
+    }
+    let aboveRange = false;
+    try { unescapeText("\\u{110000}", loose); } catch (error) { aboveRange = error instanceof EscapeError; }
+    check("a code point above U+10FFFF is refused even in tolerant mode", aboveRange);
+    let offset = -1;
+    try { unescapeText('"ok \\u00g4"', { trimQuotes: true, keepUnknown: false }); } catch (error) {
+      if (error instanceof EscapeError) offset = error.index;
+    }
+    check("the reported offset points into the original input", offset === 4, String(offset));
+
+    const unit = { style: "unit" as const, quotes: true, wrap: false };
+    check("escapes non-ASCII as \\uXXXX", escapeText("Không", unit).output === "Kh\\u00F4ng");
+    check("leaves printable ASCII alone", escapeText("a~ {}[]!", unit).output === "a~ {}[]!");
+    check("uses the short forms for control characters", escapeText("a\nb\tc", unit).output === "a\\nb\\tc");
+    check("escapes an unlisted control character as \\u00XX", escapeText("\x01\x7f", unit).output === "\\u0001\\u007F");
+    check("escapes quotes and backslashes when asked", escapeText("a\"b'c\\d", unit).output === "a\\\"b\\'c\\\\d");
+    check("leaves quotes alone when not asked", escapeText("a\"b\\c", { ...unit, quotes: false }).output === 'a"b\\c');
+    check("astral characters become a surrogate pair", escapeText("😀", unit).output === "\\uD83D\\uDE00");
+    check("astral characters can stay one escape", escapeText("😀", { ...unit, style: "codepoint" }).output === "\\u{1F600}");
+    check("wrapping produces a complete JSON string", escapeText("ô", { ...unit, wrap: true }).output === '"\\u00F4"');
+    check("counts escaped characters, not code units", escapeText("😀ô a", unit).escaped === 2);
+
+    const original = "Không tồn tại khách hàng! 👩‍💻\tx\"y\\z";
+    for (const style of ["unit", "codepoint"] as const) {
+      const round = unescapeText(escapeText(original, { style, quotes: true, wrap: true }).output, loose);
+      check(`round-trips through ${style} escapes`, round.output === original, round.output);
+    }
+    check(`JSON.parse agrees with the encoder`, JSON.parse(escapeText(original, { ...unit, wrap: true }).output) === original);
+
+    check("empty input is empty output", unescapeText("", loose).output === "" && escapeText("", unit).output === "");
+    check("input at the limit is accepted", escapeText("z".repeat(ESCAPE_INPUT_LIMIT), unit).output.length === ESCAPE_INPUT_LIMIT);
+    for (const [label, run] of [
+      ["decoding", () => unescapeText("a".repeat(ESCAPE_INPUT_LIMIT + 1), loose)],
+      ["escaping", () => escapeText("a".repeat(ESCAPE_INPUT_LIMIT + 1), unit)],
+    ] as const) {
+      let refused = false;
+      try { run(); } catch { refused = true; }
+      check(`oversized input is refused rather than truncated when ${label}`, refused);
+    }
+  }
+
   console.log("\n-- md5 --");
   {
     for (const [input, expected] of RFC1321) {
