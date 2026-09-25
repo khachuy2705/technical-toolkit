@@ -2097,3 +2097,449 @@ select {
 .sheet td[data-problem] {
   color: var(--strength-0);
 }
+
+/* ---------------------------------------------------------------------------
+   Crontab builder and explainer
+
+   Five field rows, each a mode switch plus the one panel that mode needs. The
+   output reuses the sheet and notes patterns; the job card and its list of
+   runs are the only new shapes.
+--------------------------------------------------------------------------- */
+
+.cron-quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.6rem 1rem;
+  margin-top: 1rem;
+}
+
+.cron-quick__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.cron-quick__hint {
+  grid-column: 1 / -1;
+}
+
+.cron-quick__hint code {
+  font-family: var(--font-mono);
+}
+
+.cron-build {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 1.25rem;
+}
+
+.cron-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+/* Floated, so the legend sits inside the box as an ordinary heading rather
+   than cutting into its border the way a fieldset draws it by default. */
+.cron-field__label {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.cron-field__label + * {
+  clear: both;
+}
+
+/* Four modes do not fit a phone on one line; they wrap rather than scroll. */
+.cron-field__modes {
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.cron-field__modes label {
+  flex: 1 1 auto;
+}
+
+.cron-field__modes span {
+  text-align: center;
+}
+
+.cron-field__panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.cron-field__panel[hidden] {
+  display: none;
+}
+
+.cron-field__panel select {
+  width: auto;
+  min-width: 4.5rem;
+  padding: 0.3rem 0.45rem;
+}
+
+/* A grid, not a wrapping flex column: a wrapping column measures the chip grid
+   at its narrowest — one chip wide, sixty tall — and keeps that height. */
+.cron-field__panel--chips {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.cron-field__says {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--accent);
+}
+
+.chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.6rem, 1fr));
+  gap: 0.3rem;
+}
+
+.chips--month,
+.chips--dow {
+  grid-template-columns: repeat(auto-fill, minmax(3.4rem, 1fr));
+}
+
+.chip {
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+
+.chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip span {
+  display: block;
+  padding: 0.28rem 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-align: center;
+  user-select: none;
+}
+
+.chip span:hover {
+  border-color: var(--text-faint);
+  color: var(--text);
+}
+
+.chip input:checked + span {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.chip input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chips__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* The built expression is the thing the page exists to hand over, so it gets
+   the accent treatment the primary fact cards use elsewhere. */
+.cron-out {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+
+.cron-out__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  min-width: 0;
+}
+
+.cron-out__row[hidden] {
+  display: none;
+}
+
+.cron-out__label {
+  flex: 0 0 7.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.cron-out__expr,
+.cron-out__line {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.cron-out__expr {
+  font-size: clamp(1.1rem, 3vw, 1.5rem);
+  font-weight: 600;
+}
+
+.cron-out__line {
+  font-size: 0.85rem;
+}
+
+.cron-input {
+  --io-min-height: 12rem;
+}
+
+.cron-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cron-job,
+.cron-env,
+.cron-bad {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: clamp(0.9rem, 2.5vw, 1.2rem);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+/* Inside the builder the card is already in a card, so it drops its frame. */
+.cron-slot:not(:empty) {
+  margin-top: 1.1rem;
+}
+
+.cron-slot > .cron-job {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.cron-env,
+.cron-bad {
+  gap: 0.4rem;
+  padding-block: 0.75rem;
+}
+
+.cron-env p,
+.cron-bad p {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.cron-bad {
+  border-color: color-mix(in srgb, var(--strength-0) 55%, var(--border));
+}
+
+.cron-bad p {
+  color: var(--strength-0);
+}
+
+.cron-job__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  min-width: 0;
+}
+
+.cron-job__line {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cron-job__expr {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.cron-job__say {
+  margin: 0;
+  font-size: clamp(1rem, 2.4vw, 1.15rem);
+  font-weight: 550;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.cron-job__cmd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.cron-job__cmd-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cron-job__cmd code {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.cron-job__notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cron-fields .sheet__prose {
+  min-width: 12rem;
+}
+
+.cron-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cron-runs__title {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cron-runs__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.cron-runs__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.75rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.cron-runs__item:nth-child(even) {
+  background: var(--bg-subtle);
+}
+
+/* A run a clock change moved or doubled is the one that needs reading twice. */
+.cron-runs__item[data-dst] {
+  box-shadow: inset 3px 0 0 var(--strength-1);
+}
+
+.cron-runs__when {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.cron-runs__offset {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.cron-runs__rel {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.cron-runs__tag {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--strength-1);
+}
+
+.cron-runs__skip {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--strength-1);
+}
+
+.cron-runs__never {
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--strength-0);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  color: var(--strength-0);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+/* The reference tables carry both languages; the page's switch shows one. */
+[data-describe="en"] [data-lang="vi"],
+[data-describe="vi"] [data-lang="en"] {
+  display: none;
+}

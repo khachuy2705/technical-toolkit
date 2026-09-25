@@ -257,6 +257,30 @@ export const TOOLS: readonly Tool[] = [
     },
   },
   {
+    slug: 'crontab-generator',
+    name: 'Crontab Generator & Explainer',
+    tagline: 'Pick the times, get the line — or paste one and read it.',
+    description:
+      'Build a cron expression by picking minutes, hours, days and months, or paste a whole crontab and have every line explained in plain English or Vietnamese, with its next runs in any time zone.',
+    keywords: [
+      'crontab generator',
+      'cron expression generator',
+      'cron expression explainer',
+      'crontab explained',
+      'cron next run',
+      'cron schedule',
+      'tao crontab',
+      'giai thich crontab',
+    ],
+    icon: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/>',
+    status: 'live',
+    group: 'time',
+    vi: {
+      name: 'Tạo & giải thích crontab',
+      tagline: 'Chọn giờ, ngày, tháng ra dòng crontab; dán crontab ra lời giải thích.',
+    },
+  },
+  {
     slug: 'uuid-generator',
     name: 'UUID Generator',
     tagline: 'v4 and v7 identifiers, in bulk.',

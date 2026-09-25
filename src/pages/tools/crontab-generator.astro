@@ -1,0 +1,1134 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
+import {
+  BUILDER_MODES,
+  DOW_NAMES,
+  FIELDS,
+  MACROS,
+  MONTH_NAMES,
+  builderMax,
+  describeSchedule,
+  parseSchedule,
+  type BuilderMode,
+  type FieldId,
+} from "../../lib/cron";
+
+const two = (n: number) => String(n).padStart(2, "0");
+const span = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
+const cap = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** How a field's values read on a chip or in a select. */
+const LABEL: Record<FieldId, (value: number) => string> = {
+  minute: two,
+  hour: two,
+  dom: String,
+  month: (v) => cap(MONTH_NAMES[v - 1]!),
+  dow: (v) => cap(DOW_NAMES[v]!),
+};
+
+interface FieldUi {
+  id: FieldId;
+  unit: string;
+  modes: readonly { mode: BuilderMode; label: string }[];
+  /** Chip order: day of week reads Monday first, as a week does. */
+  chips: number[];
+  options: number[];
+  steps: number[];
+  /** What each mode opens on, so switching to it shows something sensible. */
+  step: number;
+  range: readonly [number, number];
+}
+
+const UNITS: Record<FieldId, string> = { minute: "minutes", hour: "hours", dom: "days", month: "months", dow: "days" };
+const EVERY_LABEL: Record<FieldId, string> = {
+  minute: "Every minute",
+  hour: "Every hour",
+  dom: "Every day",
+  month: "Every month",
+  dow: "Every day",
+};
+const MODE_LABEL: Record<Exclude<BuilderMode, "every">, string> = { step: "Every N", specific: "Specific", range: "Range" };
+
+const FIELD_UI: FieldUi[] = (["minute", "hour", "dom", "month", "dow"] as const).map((id) => {
+  const spec = FIELDS[id];
+  const max = builderMax(id);
+  return {
+    id,
+    unit: UNITS[id],
+    modes: BUILDER_MODES[id].map((mode) => ({
+      mode,
+      label: mode === "every" ? EVERY_LABEL[id] : mode === "step" ? `${MODE_LABEL.step} ${UNITS[id]}` : MODE_LABEL[mode],
+    })),
+    chips: id === "dow" ? [1, 2, 3, 4, 5, 6, 0] : span(spec.min, max),
+    options: span(spec.min, max),
+    steps: span(1, max - spec.min),
+    step: { minute: 5, hour: 2, dom: 2, month: 3, dow: 2 }[id],
+    range: ({ minute: [0, 29], hour: [9, 17], dom: [1, 15], month: [1, 6], dow: [1, 5] } as const)[id],
+  };
+});
+
+const PRESETS = [
+  { label: "Every minute", expression: "* * * * *" },
+  { label: "Every 5 minutes", expression: "*/5 * * * *" },
+  { label: "Every hour", expression: "0 * * * *" },
+  { label: "Daily at midnight", expression: "0 0 * * *" },
+  { label: "Daily at 02:00", expression: "0 2 * * *" },
+  { label: "Weekdays at 08:30", expression: "30 8 * * 1-5" },
+  { label: "Mondays at 09:00", expression: "0 9 * * 1" },
+  { label: "1st of the month", expression: "0 0 1 * *" },
+  { label: "Every quarter", expression: "0 0 1 */3 *" },
+  { label: "Every 1 January", expression: "0 0 1 1 *" },
+];
+
+const SAMPLE_CRONTAB = `# m  h  dom mon dow  command
+SHELL=/bin/bash
+MAILTO=ops@example.com
+*/15 * * * *  /usr/local/bin/healthcheck.sh
+30 2 * * *    /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+0 8 * * 1-5   /usr/local/bin/report.sh --day "$(date -d yesterday +%F)"
+0 0 13 * 5    /usr/local/bin/audit.sh
+@reboot       /usr/local/bin/start-agent`;
+
+/** Debian's stock /etc/crontab: the file most people first meet a user column in. */
+const SYSTEM_CRONTAB = `SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user  command
+17 *  * * *  root  cd / && run-parts --report /etc/cron.hourly
+25 6  * * *  root  test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 6  * * 7  root  test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 6  1 * *  root  test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )`;
+
+const EXPLAIN_PRESETS = ["30 8 * * 1-5", "0 0 13 * 5", "0 0 */2 * 1", "*/7 * * * *", "0 0 31 * *", "@weekly"];
+
+/**
+ * Described at build time by the same function the page runs, so the table and
+ * the tool cannot disagree. Both languages are rendered; the switch shows one.
+ */
+const EXAMPLES = [
+  "* * * * *",
+  "*/5 * * * *",
+  "0 * * * *",
+  "0 */6 * * *",
+  "0 0 * * *",
+  "30 2 * * *",
+  "30 8 * * 1-5",
+  "0 9 * * 1",
+  "0 9-17 * * 1-5",
+  "*/15 9-17 * * 1-5",
+  "0 0 * * 0,6",
+  "0 0 1 * *",
+  "0 0 1,15 * *",
+  "0 0 1 */3 *",
+  "0 0 1 1 *",
+  "0 0 13 * 5",
+].map((expression) => {
+  const schedule = parseSchedule(expression);
+  return { expression, en: describeSchedule(schedule, "en"), vi: describeSchedule(schedule, "vi") };
+});
+
+const SHORTHANDS = [...MACROS].map(([macro, expansion]) => {
+  const schedule = parseSchedule(expansion);
+  return { macro, expansion, en: describeSchedule(schedule, "en"), vi: describeSchedule(schedule, "vi") };
+});
+
+const FIELD_REFERENCE = [
+  { id: "minute", values: "0–59", names: "—", example: "*/15" },
+  { id: "hour", values: "0–23", names: "—", example: "9-17" },
+  { id: "dom", values: "1–31", names: "—", example: "1,15" },
+  { id: "month", values: "1–12", names: "jan … dec", example: "*/3" },
+  { id: "dow", values: "0–7 (0 and 7 are Sunday)", names: "sun … sat", example: "1-5" },
+] as const;
+---
+
+<ToolLayout slug="crontab-generator">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <label class="field__label" for="zone">Server time zone</label>
+        <select id="zone"></select>
+        <p class="field__hint" id="zone-hint">
+          Cron reads schedules in the server&rsquo;s own zone. Next runs are listed in this one.
+        </p>
+      </div>
+      <div class="field">
+        <span class="field__label">Describe schedules in</span>
+        <div class="segmented" role="radiogroup" aria-label="Language of the plain-language description">
+          <label><input type="radio" name="lang" value="en" checked /><span>English</span></label>
+          <label><input type="radio" name="lang" value="vi" /><span lang="vi">Tiếng Việt</span></label>
+        </div>
+        <p class="field__hint">The sentence and the field meanings follow this; everything else stays English.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="builder">
+    <h2 class="card__title">Build a schedule</h2>
+
+    <div class="preset-row" style="margin-top:0">
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-build-preset={preset.expression}>{preset.label}</button>)}
+    </div>
+
+    <div class="cron-quick">
+      <label class="cron-quick__item">
+        <span class="field__label">At a time of day</span>
+        <input type="time" id="quick-time" class="text-input" />
+      </label>
+      <label class="cron-quick__item">
+        <span class="field__label">On a date, every year</span>
+        <input type="datetime-local" id="quick-date" class="text-input" />
+      </label>
+      <p class="field__hint cron-quick__hint">
+        A time sets the minute and the hour. A date sets the day and the month as well &mdash; and
+        since cron has no year field, it comes round again every year. For a one-off job, use{" "}
+        <code>at</code>, or remove the line once it has run.
+      </p>
+    </div>
+
+    <div class="cron-build">
+      {
+        FIELD_UI.map((ui) => (
+          <fieldset class="cron-field" data-field={ui.id}>
+            <legend class="cron-field__label">{FIELDS[ui.id].label}</legend>
+
+            <div class="segmented cron-field__modes" role="radiogroup" aria-label={`How to choose the ${FIELDS[ui.id].label.toLowerCase()}`}>
+              {ui.modes.map((mode) => (
+                <label>
+                  <input type="radio" name={`mode-${ui.id}`} value={mode.mode} checked={mode.mode === "every"} />
+                  <span>{mode.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {ui.id !== "dow" && (
+              <div class="cron-field__panel" data-panel="step" hidden>
+                <span>Every</span>
+                <select data-input="step" aria-label={`Step in ${ui.unit}`}>
+                  {ui.steps.map((step) => <option value={String(step)} selected={step === ui.step}>{step}</option>)}
+                </select>
+                <span>{ui.unit}, starting at</span>
+                <select data-input="start" aria-label="Starting value">
+                  {ui.options.map((value) => <option value={String(value)}>{LABEL[ui.id](value)}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div class="cron-field__panel cron-field__panel--chips" data-panel="specific" hidden>
+              <div class:list={["chips", `chips--${ui.id}`]}>
+                {ui.chips.map((value) => (
+                  <label class="chip">
+                    <input type="checkbox" value={String(value)} />
+                    <span>{LABEL[ui.id](value)}</span>
+                  </label>
+                ))}
+              </div>
+              <div class="chips__actions">
+                {ui.id === "dow" && (
+                  <>
+                    <button type="button" class="btn btn--tiny" data-pick="1,2,3,4,5">Weekdays</button>
+                    <button type="button" class="btn btn--tiny" data-pick="6,0">Weekend</button>
+                  </>
+                )}
+                {ui.id === "hour" && <button type="button" class="btn btn--tiny" data-pick="9,10,11,12,13,14,15,16,17">09–17</button>}
+                <button type="button" class="btn btn--tiny" data-pick="">Clear</button>
+              </div>
+            </div>
+
+            <div class="cron-field__panel" data-panel="range" hidden>
+              <span>From</span>
+              <select data-input="from" aria-label="Start of the range">
+                {ui.options.map((value) => <option value={String(value)} selected={value === ui.range[0]}>{LABEL[ui.id](value)}</option>)}
+              </select>
+              <span>to</span>
+              <select data-input="to" aria-label="End of the range">
+                {ui.options.map((value) => <option value={String(value)} selected={value === ui.range[1]}>{LABEL[ui.id](value)}</option>)}
+              </select>
+              <span>, every</span>
+              <select data-input="rstep" aria-label={`Step within the range, in ${ui.unit}`}>
+                {ui.steps.map((step) => <option value={String(step)}>{step}</option>)}
+              </select>
+            </div>
+
+            <p class="cron-field__says" data-says></p>
+          </fieldset>
+        ))
+      }
+    </div>
+
+    <div class="controls" style="margin-top:1.25rem">
+      <div class="field">
+        <label class="field__label" for="command">Command <span class="field__hint">optional</span></label>
+        <input
+          type="text"
+          id="command"
+          class="text-input"
+          placeholder="/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          autocorrect="off"
+        />
+      </div>
+      <div class="field">
+        <span class="field__label">Style</span>
+        <label class="check">
+          <input type="checkbox" id="names" />
+          <span class="check__text">
+            Write months and weekdays as names
+            <span class="check__sample">mon-fri instead of 1-5</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <p class="qc__note" id="builder-note" role="status" data-warn hidden></p>
+
+    <div class="cron-out" id="build-out">
+      <div class="cron-out__row">
+        <span class="cron-out__label">Expression</span>
+        <code class="cron-out__expr" id="build-expr">&mdash;</code>
+        <button type="button" class="btn btn--tiny" id="build-copy" aria-label="Copy the cron expression">
+          <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+          <span data-label>Copy</span>
+        </button>
+      </div>
+      <div class="cron-out__row" id="build-line-row" hidden>
+        <span class="cron-out__label">Crontab line</span>
+        <code class="cron-out__line" id="build-line"></code>
+        <button type="button" class="btn btn--tiny" id="build-line-copy" aria-label="Copy the whole crontab line">
+          <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+          <span data-label>Copy</span>
+        </button>
+      </div>
+    </div>
+
+    <p class="output__error" id="build-error" role="alert" hidden></p>
+    <div id="build-card" class="cron-slot"></div>
+  </section>
+
+  <section class="card" id="explainer">
+    <div class="io__head">
+      <label class="io__label" for="crontab">Explain a crontab &mdash; one expression, or a whole file</label>
+      <span class="io__meta" id="crontab-meta"></span>
+    </div>
+
+    <textarea
+      id="crontab"
+      class="io__text cron-input"
+      rows="9"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      placeholder="30 8 * * 1-5   /usr/local/bin/report.sh">{SAMPLE_CRONTAB}</textarea>
+
+    <div class="preset-row">
+      {EXPLAIN_PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-explain-preset={preset}>{preset}</button>)}
+      <button type="button" class="btn btn--tiny" id="sample-user">Sample crontab</button>
+      <button type="button" class="btn btn--tiny" id="sample-system" data-sample={SYSTEM_CRONTAB}>/etc/crontab</button>
+      <button type="button" class="btn btn--tiny" id="crontab-clear">Clear</button>
+    </div>
+
+    <label class="check" style="margin-top:0.75rem">
+      <input type="checkbox" id="user-field" />
+      <span class="check__text">
+        Lines include a user
+        <span class="check__sample">/etc/crontab and /etc/cron.d put a user name between the schedule and the command</span>
+      </span>
+    </label>
+  </section>
+
+  <p class="output__error" id="crontab-error" role="alert" hidden></p>
+  <div class="cron-list" id="crontab-out"></div>
+
+  <section class="card" data-describe="en">
+    <h2 class="card__title">Common schedules</h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          Frequently used cron expressions and what each one means. Every expression has a button that copies it.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Expression</th>
+            <th scope="col">Runs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            EXAMPLES.map((row) => (
+              <tr data-common={row.expression === "0 0 13 * 5" ? "" : undefined}>
+                <th scope="row" class="sheet__key">
+                  <span class="sheet__mask">
+                    {row.expression}
+                    <button
+                      type="button"
+                      class="sheet__copy"
+                      data-copy-mask={row.expression}
+                      title={`Copy ${row.expression}`}
+                      aria-label={`Copy the expression ${row.expression}`}
+                    >
+                      <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+                    </button>
+                  </span>
+                </th>
+                <td class="sheet__prose">
+                  <span data-lang="en">{row.en}</span>
+                  <span data-lang="vi" lang="vi">{row.vi}</span>
+                </td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      Described by the same code as the tools above. The highlighted row is the one that surprises
+      people: it runs on every 13th <em>and</em> every Friday.
+    </p>
+  </section>
+
+  <section class="card" data-describe="en">
+    <h2 class="card__title">Fields, operators and shorthands</h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">The five fields of a cron schedule, in order, with the values each accepts.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Field</th>
+            <th scope="col">Values</th>
+            <th scope="col">Names</th>
+            <th scope="col">Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            FIELD_REFERENCE.map((row) => (
+              <tr>
+                <th scope="row" class="sheet__key">{FIELDS[row.id].label}</th>
+                <td>{row.values}</td>
+                <td>{row.names}</td>
+                <td>{row.example}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="margin-top:0.9rem">
+      <table class="sheet">
+        <caption class="visually-hidden">The four operators that can appear inside a field.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Operator</th>
+            <th scope="col">Means</th>
+            <th scope="col">Example</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row" class="sheet__key">*</th><td class="sheet__prose">every value of the field</td><td>* * * * *</td></tr>
+          <tr><th scope="row" class="sheet__key">,</th><td class="sheet__prose">a list of values or ranges</td><td>0 9,13,17 * * *</td></tr>
+          <tr><th scope="row" class="sheet__key">-</th><td class="sheet__prose">a range, both ends included; it never wraps round</td><td>0 9 * * 1-5</td></tr>
+          <tr><th scope="row" class="sheet__key">/</th><td class="sheet__prose">a step through * or a range, starting at its first value</td><td>*/15 9-17 * * *</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" style="margin-top:0.9rem">
+      <table class="sheet">
+        <caption class="visually-hidden">The @ shorthands and the five fields each one stands for.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Shorthand</th>
+            <th scope="col">Stands for</th>
+            <th scope="col">Runs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            SHORTHANDS.map((row) => (
+              <tr>
+                <th scope="row" class="sheet__key">{row.macro}</th>
+                <td>{row.expansion}</td>
+                <td class="sheet__prose">
+                  <span data-lang="en">{row.en}</span>
+                  <span data-lang="vi" lang="vi">{row.vi}</span>
+                </td>
+              </tr>
+            ))
+          }
+          <tr>
+            <th scope="row" class="sheet__key">@reboot</th>
+            <td>&mdash;</td>
+            <td class="sheet__prose">
+              <span data-lang="en">{describeSchedule(parseSchedule("@reboot"), "en")}</span>
+              <span data-lang="vi" lang="vi">{describeSchedule(parseSchedule("@reboot"), "vi")}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose">
+    <h2>Day of month <em>or</em> day of week</h2>
+    <p>
+      When both day fields are restricted, cron runs on a day that matches <b>either</b> of them.{" "}
+      <code>0 0 13 * 5</code> is not &ldquo;Friday the 13th&rdquo;: it runs on every 13th and on every
+      Friday, roughly five times a month. The page says so under any schedule that does this.
+    </p>
+    <p>
+      The rule has a trap inside it. Cron decides whether a field is restricted from its <b>first
+      character</b>, not from what it matches &mdash; so <code>*/2</code> in the day-of-month field
+      counts as unrestricted, and <code>0 0 */2 * 1</code> means &ldquo;odd-numbered days that are
+      also Mondays&rdquo;. Written as <code>1-31/2</code>, the same days would be joined with OR
+      instead. To require a date and a weekday together, keep one field <code>*</code> and test the
+      other in the command: <code>[ "$(date +\%u)" = 5 ] &amp;&amp; your-command</code>.
+    </p>
+
+    <h2>% is not a percent sign</h2>
+    <p>
+      In the command part of a crontab line, cron turns an unescaped <code>%</code> into a newline and
+      feeds everything after the first one to the command as input. <code>date +%F</code> therefore
+      works in a terminal and silently breaks in cron. Write <code>date +\%F</code>. The explainer
+      flags every command with a bare <code>%</code>.
+    </p>
+
+    <h2>Which clock cron reads</h2>
+    <p>
+      A schedule has no zone of its own: cron matches it against the server&rsquo;s local time. A
+      server in UTC runs <code>0 8 * * *</code> at 15:00 in Hanoi. cronie also honours a{" "}
+      <code>CRON_TZ=</code> line, which sets the zone for the jobs below it; the explainer follows
+      that when it lists runs, and the zone selector above covers everything else.
+    </p>
+    <p>
+      Around a daylight-saving change, Vixie cron and cronie treat jobs differently by how they are
+      written. A job whose minute and hour are both fixed, like <code>30 2 * * *</code>, runs once that
+      day whatever the clocks do &mdash; at the moment of the jump if 02:30 was skipped, and only the
+      first time if 01:30 happened twice. A job whose minute or hour begins with <code>*</code>, like{" "}
+      <code>30 * * * *</code>, follows the wall clock: it loses the skipped hour and runs twice in the
+      repeated one. The lists of next runs above follow those rules and label each run they touch.
+      systemd timers, busybox crond and cloud schedulers each do something of their own.
+    </p>
+
+    <h2>The last day of the month</h2>
+    <p>
+      Crontab has no way to say it. A day a month does not have is skipped, not moved:{" "}
+      <code>0 0 31 * *</code> runs seven times a year, and <code>0 0 30 2 *</code> never runs at all,
+      which the page proves by searching a whole 400-year cycle of the calendar rather than giving
+      up after a while. The usual answer is <code>0 0 28-31 * *</code> with a test in the command:{" "}
+      <code>[ "$(date -d tomorrow +\%d)" = 01 ] &amp;&amp; your-command</code>.
+    </p>
+
+    <h2>What this page reads, and what it does not</h2>
+    <p>
+      The dialect is crontab(5) as cronie and Debian&rsquo;s cron implement it: five fields,
+      three-letter names, lists, ranges and steps, the @ shorthands, <code>NAME=value</code> lines
+      and the user column of system crontabs. Quartz and Spring expressions (seconds first,{" "}
+      <code>?</code>, <code>L</code>, <code>W</code>, <code>#</code>), Jenkins&rsquo; <code>H</code>{" "}
+      and Go&rsquo;s <code>@every</code> are refused by name rather than misread. Everything runs in
+      your browser, and only the settings above are remembered &mdash; never a crontab or a command,
+      which can carry paths, addresses and tokens.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    FIELD_IDS,
+    FIELDS,
+    buildExpression,
+    choiceFromField,
+    describeFieldValues,
+    describeSchedule,
+    everyChoice,
+    formatRun,
+    nextRuns,
+    parseCrontab,
+    parseField,
+    parseSchedule,
+    type CronJob,
+    type CronLang,
+    type CronRun,
+    type CronTimes,
+    type CrontabEntry,
+    type FieldChoice,
+    type FieldId,
+  } from "../../lib/cron";
+  import { availableZones, localZone, relativeToNow } from "../../lib/epoch";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+
+  const PREFS_KEY = "tt-cron";
+  /** A single schedule gets a longer list than each job of a whole file. */
+  const SINGLE_RUNS = 10;
+  const FILE_RUNS = 5;
+
+  const zoneSelect = el<HTMLSelectElement>("#zone");
+  const zoneHint = el<HTMLElement>("#zone-hint");
+  const langRadios = all<HTMLInputElement>('input[name="lang"]');
+  const namesBox = el<HTMLInputElement>("#names");
+  const userBox = el<HTMLInputElement>("#user-field");
+  const commandInput = el<HTMLInputElement>("#command");
+
+  const builder = el<HTMLElement>("#builder");
+  const builderNote = el<HTMLElement>("#builder-note");
+  const buildExpr = el<HTMLElement>("#build-expr");
+  const buildLine = el<HTMLElement>("#build-line");
+  const buildLineRow = el<HTMLElement>("#build-line-row");
+  const buildError = el<HTMLElement>("#build-error");
+  const buildCard = el<HTMLElement>("#build-card");
+
+  const crontabInput = el<HTMLTextAreaElement>("#crontab");
+  const crontabMeta = el<HTMLElement>("#crontab-meta");
+  const crontabError = el<HTMLElement>("#crontab-error");
+  const crontabOut = el<HTMLElement>("#crontab-out");
+
+  /* ----------------------------------------------------------------- settings */
+
+  const HOME = localZone();
+  const zones = availableZones();
+  {
+    const fragment = document.createDocumentFragment();
+    for (const zone of zones) {
+      const option = document.createElement("option");
+      option.value = zone;
+      option.textContent = zone === HOME ? `${zone} (browser)` : zone;
+      fragment.append(option);
+    }
+    zoneSelect.append(fragment);
+    zoneSelect.value = HOME;
+  }
+
+  // Settings only. A crontab can carry paths, addresses and tokens, so neither
+  // it nor the builder's command is ever written to storage.
+  const prefs = loadPrefs(PREFS_KEY, { zone: HOME, lang: "en", names: false, userField: false });
+  if (typeof prefs.zone === "string" && zones.includes(prefs.zone)) zoneSelect.value = prefs.zone;
+  for (const radio of langRadios) radio.checked = radio.value === prefs.lang;
+  if (!langRadios.some((radio) => radio.checked)) langRadios[0]!.checked = true;
+  namesBox.checked = prefs.names === true;
+  userBox.checked = prefs.userField === true;
+
+  const lang = (): CronLang => (langRadios.find((radio) => radio.checked)?.value === "vi" ? "vi" : "en");
+  /** The selected zone, or the browser's if the select ever holds nothing — Intl throws on "". */
+  const serverZone = (): string => zoneSelect.value || HOME;
+
+  function remember(): void {
+    savePrefs(PREFS_KEY, {
+      zone: zoneSelect.value,
+      lang: lang(),
+      names: namesBox.checked,
+      userField: userBox.checked,
+    });
+  }
+
+  function paintZoneHint(): void {
+    const zone = serverZone();
+    zoneHint.textContent =
+      zone === HOME
+        ? "Your browser's zone. Cron reads schedules in the server's own zone — pick that one if it differs."
+        : `Next runs are listed as a server set to ${zone} would run them.`;
+  }
+
+  /* ---------------------------------------------------------------- rendering */
+
+  function node<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    className?: string,
+    text?: string,
+  ): HTMLElementTagNameMap[K] {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  }
+
+  /**
+   * What each output area has on screen that goes stale: relative-time labels,
+   * refreshed in place, and the soonest run, after which the area is rebuilt.
+   */
+  interface Clock {
+    relatives: { node: HTMLElement; ms: number }[];
+    soonest: number;
+  }
+  const freshClock = (): Clock => ({ relatives: [], soonest: Number.POSITIVE_INFINITY });
+  let buildClock = freshClock();
+  let explainClock = freshClock();
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  function runTag(run: CronRun): string {
+    const wall = `${pad(run.wall.hour)}:${pad(run.wall.minute)}`;
+    switch (run.kind) {
+      case "gap":
+        return `${wall} does not exist that day — the clocks jump forward, and cron runs the job as they do.`;
+      case "overlap-once":
+        return `${wall} happens twice that day; cron runs this job the first time only.`;
+      case "overlap-first":
+        return `The first of two ${wall}s that day — the clocks go back an hour later.`;
+      case "overlap-second":
+        return `${wall} again, after the clocks went back: this job follows the wall clock.`;
+      default:
+        return "";
+    }
+  }
+
+  function renderRuns(schedule: CronTimes, zone: string, count: number, via: string | null, clock: Clock): HTMLElement {
+    const box = node("div", "cron-runs");
+    box.append(node("h3", "cron-runs__title", `Next runs in ${zone}${via ? ` — ${via}` : ""}`));
+
+    const now = Date.now();
+    const search = nextRuns(schedule, zone, now, count);
+    if (search.never) {
+      box.append(
+        node(
+          "p",
+          "cron-runs__never",
+          "Never runs. No date in a whole 400-year cycle of the calendar matches this schedule, so none ever will.",
+        ),
+      );
+      return box;
+    }
+
+    const list = node("ol", "cron-runs__list");
+    for (const run of search.runs) {
+      const item = node("li", "cron-runs__item");
+      const when = formatRun(run.ms, zone);
+      const rel = node("span", "cron-runs__rel", relativeToNow(run.ms, now));
+      clock.relatives.push({ node: rel, ms: run.ms });
+      clock.soonest = Math.min(clock.soonest, run.ms);
+      item.append(node("span", "cron-runs__when", when.when), node("span", "cron-runs__offset", when.offset), rel);
+      const tag = runTag(run);
+      if (tag) {
+        item.dataset["dst"] = "";
+        item.append(node("span", "cron-runs__tag", tag));
+      }
+      list.append(item);
+    }
+    box.append(list);
+
+    for (const skip of search.skipped) {
+      const day = formatRun(skip.ms, zone).when.slice(0, 14);
+      box.append(
+        node(
+          "p",
+          "cron-runs__skip",
+          `No run at ${pad(skip.wall.hour)}:${pad(skip.wall.minute)} on ${day}: the clocks jump over it, and a job whose minute or hour starts with * follows the wall clock.`,
+        ),
+      );
+    }
+    return box;
+  }
+
+  function renderFields(schedule: CronTimes): HTMLElement {
+    const wrap = node("div", "table-wrap cron-fields");
+    const table = node("table", "sheet");
+    const caption = node("caption", "visually-hidden", "Each field of the schedule, as written and as cron expands it.");
+    const head = node("thead");
+    const headRow = node("tr");
+    for (const title of ["Field", "Written", "Matches"]) {
+      const th = node("th", undefined, title);
+      th.setAttribute("scope", "col");
+      headRow.append(th);
+    }
+    head.append(headRow);
+    const body = node("tbody");
+    for (const id of FIELD_IDS) {
+      const field = schedule.fields[id];
+      const row = node("tr");
+      const th = node("th", "sheet__key", FIELDS[id].label);
+      th.setAttribute("scope", "row");
+      const matches = node("td", "sheet__prose", describeFieldValues(field, lang()));
+      matches.lang = lang();
+      row.append(th, node("td", undefined, field.text), matches);
+      body.append(row);
+    }
+    table.append(caption, head, body);
+    wrap.append(table);
+    return wrap;
+  }
+
+  function renderJob(job: CronJob, options: { heading: boolean; runs: number; clock: Clock }): HTMLElement {
+    const card = node("article", "cron-job");
+    const schedule = job.schedule;
+
+    if (options.heading) {
+      const head = node("header", "cron-job__head");
+      head.append(
+        node("span", "cron-job__line", `Line ${job.line}`),
+        node("code", "cron-job__expr", schedule.macro ?? schedule.expression),
+      );
+      if (schedule.kind === "times") {
+        const edit = node("button", "btn btn--tiny", "Edit in builder");
+        edit.type = "button";
+        edit.addEventListener("click", () => loadIntoBuilder(schedule, job.command));
+        head.append(edit);
+      }
+      card.append(head);
+    }
+
+    const say = node("p", "cron-job__say", describeSchedule(schedule, lang()));
+    say.lang = lang();
+    card.append(say);
+
+    if (job.command !== "" || job.user !== null) {
+      const cmd = node("p", "cron-job__cmd");
+      cmd.append(
+        node("span", "cron-job__cmd-label", job.user === null ? "Runs" : `Runs as ${job.user}`),
+        node("code", undefined, job.command === "" ? "(no command)" : job.command),
+      );
+      card.append(cmd);
+    }
+
+    if (schedule.kind === "times") card.append(renderFields(schedule));
+
+    if (job.notes.length > 0) {
+      const notes = node("ul", "notes cron-job__notes");
+      for (const text of job.notes) notes.append(node("li", "notes__item", text));
+      card.append(notes);
+    }
+
+    if (schedule.kind === "times") {
+      const zone = job.zone?.name ?? serverZone();
+      const via = job.zone ? `CRON_TZ, line ${job.zone.line}` : null;
+      card.append(renderRuns(schedule, zone, options.runs, via, options.clock));
+    }
+    return card;
+  }
+
+  function renderEntry(entry: CrontabEntry, runs: number, clock: Clock): HTMLElement {
+    if (entry.kind === "job") return renderJob(entry, { heading: true, runs, clock });
+
+    const card = node("article", entry.kind === "env" ? "cron-env" : "cron-bad");
+    const head = node("header", "cron-job__head");
+    head.append(node("span", "cron-job__line", `Line ${entry.line}`), node("code", "cron-job__expr", entry.source));
+    card.append(head, node("p", undefined, entry.kind === "env" ? entry.explanation : entry.message));
+    return card;
+  }
+
+  /* ------------------------------------------------------------------ builder */
+
+  const fieldRoot = (id: FieldId): HTMLElement => el<HTMLElement>(`[data-field="${id}"]`);
+  const modeOf = (id: FieldId): string => el<HTMLInputElement>('input[type="radio"]:checked', fieldRoot(id)).value;
+
+  function showPanel(id: FieldId): void {
+    const mode = modeOf(id);
+    for (const panel of all<HTMLElement>("[data-panel]", fieldRoot(id))) panel.hidden = panel.dataset["panel"] !== mode;
+  }
+
+  function readChoice(id: FieldId): FieldChoice {
+    const root = fieldRoot(id);
+    const pick = (name: string, fallback: number): number => {
+      const select = root.querySelector<HTMLSelectElement>(`[data-input="${name}"]`);
+      return select ? Number(select.value) : fallback;
+    };
+    const mode = modeOf(id) as FieldChoice["mode"];
+    return {
+      mode,
+      step: mode === "range" ? pick("rstep", 1) : pick("step", 1),
+      start: pick("start", FIELDS[id].min),
+      values: all<HTMLInputElement>('input[type="checkbox"]:checked', root).map((box) => Number(box.value)),
+      from: pick("from", FIELDS[id].min),
+      to: pick("to", FIELDS[id].max),
+    };
+  }
+
+  function writeChoice(id: FieldId, choice: FieldChoice): void {
+    const root = fieldRoot(id);
+    el<HTMLInputElement>(`input[type="radio"][value="${choice.mode}"]`, root).checked = true;
+    const set = (name: string, value: number) => {
+      const select = root.querySelector<HTMLSelectElement>(`[data-input="${name}"]`);
+      if (select?.querySelector(`option[value="${value}"]`)) select.value = String(value);
+    };
+    if (choice.mode === "step") {
+      set("step", choice.step);
+      set("start", choice.start);
+    } else if (choice.mode === "range") {
+      set("from", choice.from);
+      set("to", choice.to);
+      set("rstep", choice.step);
+    }
+    if (choice.mode === "specific") {
+      const values = new Set(choice.values);
+      for (const box of all<HTMLInputElement>('input[type="checkbox"]', root)) box.checked = values.has(Number(box.value));
+    }
+    showPanel(id);
+  }
+
+  let built = "";
+  let builtLine = "";
+
+  function runBuild(): void {
+    buildClock = freshClock();
+    buildCard.replaceChildren();
+
+    const choices = {} as Record<FieldId, FieldChoice>;
+    for (const id of FIELD_IDS) choices[id] = readChoice(id);
+
+    let expression: string;
+    try {
+      expression = buildExpression(choices, namesBox.checked);
+    } catch (error) {
+      built = "";
+      builtLine = "";
+      buildExpr.textContent = "—";
+      buildLineRow.hidden = true;
+      buildError.textContent = error instanceof Error ? error.message : String(error);
+      buildError.hidden = false;
+      return;
+    }
+
+    buildError.hidden = true;
+    built = expression;
+    buildExpr.textContent = expression;
+
+    const tokens = expression.split(" ");
+    FIELD_IDS.forEach((id, index) => {
+      const says = el<HTMLElement>("[data-says]", fieldRoot(id));
+      says.textContent = describeFieldValues(parseField(id, tokens[index]!), lang());
+      says.lang = lang();
+    });
+
+    const command = commandInput.value.trim();
+    builtLine = command === "" ? "" : `${expression} ${command}`;
+    buildLine.textContent = builtLine;
+    buildLineRow.hidden = builtLine === "";
+
+    const entry = parseCrontab(builtLine || expression, { userField: false })[0];
+    if (entry?.kind === "job") {
+      buildCard.append(renderJob(entry, { heading: false, runs: SINGLE_RUNS, clock: buildClock }));
+    } else if (entry?.kind === "error") {
+      buildError.textContent = entry.message;
+      buildError.hidden = false;
+    }
+  }
+
+  function builderSays(text: string): void {
+    builderNote.textContent = text;
+    builderNote.hidden = text === "";
+  }
+
+  /** Sets every field from a schedule. Returns the fields that could not be copied exactly. */
+  function applySchedule(schedule: CronTimes): string[] {
+    const inexact: string[] = [];
+    for (const id of FIELD_IDS) {
+      const { choice, exact } = choiceFromField(schedule.fields[id]);
+      writeChoice(id, choice);
+      if (!exact) inexact.push(FIELDS[id].label.toLowerCase());
+    }
+    return inexact;
+  }
+
+  function loadIntoBuilder(schedule: CronTimes, command: string): void {
+    const inexact = applySchedule(schedule);
+    commandInput.value = command;
+    builderSays(
+      inexact.length === 0
+        ? ""
+        : `The ${inexact.join(" and ")} began with *, which cron reads specially, and the builder writes it as a plain list. Compare the two descriptions before swapping one line for the other.`,
+    );
+    runBuild();
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    builder.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }
+
+  /* ---------------------------------------------------------------- explainer */
+
+  function runExplain(): void {
+    explainClock = freshClock();
+    crontabOut.replaceChildren();
+
+    const text = crontabInput.value;
+    if (text.trim() === "") {
+      crontabError.hidden = true;
+      crontabMeta.textContent = "";
+      return;
+    }
+
+    let entries: CrontabEntry[];
+    try {
+      entries = parseCrontab(text, { userField: userBox.checked });
+    } catch (error) {
+      crontabError.textContent = error instanceof Error ? error.message : String(error);
+      crontabError.hidden = false;
+      crontabMeta.textContent = "";
+      return;
+    }
+    crontabError.hidden = true;
+
+    const count = (kind: CrontabEntry["kind"]) => entries.filter((entry) => entry.kind === kind).length;
+    const jobs = count("job");
+    const settings = count("env");
+    const bad = count("error");
+    const parts = [`${jobs} job${jobs === 1 ? "" : "s"}`];
+    if (settings > 0) parts.push(`${settings} setting${settings === 1 ? "" : "s"}`);
+    if (bad > 0) parts.push(`${bad} unreadable`);
+    crontabMeta.textContent = parts.join(", ");
+
+    if (entries.length === 0) {
+      crontabOut.append(node("p", "field__hint", "Only comments and blank lines — nothing for cron to run."));
+      return;
+    }
+    const runs = jobs === 1 ? SINGLE_RUNS : FILE_RUNS;
+    for (const entry of entries) crontabOut.append(renderEntry(entry, runs, explainClock));
+  }
+
+  /** Language and zone change both outputs; each also rebuilds on its own inputs. */
+  function renderAll(): void {
+    for (const section of all<HTMLElement>("[data-describe]")) section.dataset["describe"] = lang();
+    runBuild();
+    runExplain();
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  for (const id of FIELD_IDS) {
+    const root = fieldRoot(id);
+    for (const radio of all<HTMLInputElement>('input[type="radio"]', root)) {
+      radio.addEventListener("change", () => {
+        // An empty list is an error, so a field switched to "specific" opens
+        // with its first value ticked rather than on a red line.
+        const boxes = all<HTMLInputElement>('input[type="checkbox"]', root);
+        if (modeOf(id) === "specific" && !boxes.some((box) => box.checked)) boxes[0]!.checked = true;
+        showPanel(id);
+        builderSays("");
+        runBuild();
+      });
+    }
+    for (const control of all<HTMLInputElement | HTMLSelectElement>('select, input[type="checkbox"]', root)) {
+      control.addEventListener("change", () => {
+        builderSays("");
+        runBuild();
+      });
+    }
+    for (const button of all<HTMLButtonElement>("[data-pick]", root)) {
+      button.addEventListener("click", () => {
+        const picks = new Set((button.dataset["pick"] ?? "").split(",").filter((v) => v !== "").map(Number));
+        for (const box of all<HTMLInputElement>('input[type="checkbox"]', root)) box.checked = picks.has(Number(box.value));
+        runBuild();
+      });
+    }
+  }
+
+  for (const button of all<HTMLButtonElement>("[data-build-preset]")) {
+    button.addEventListener("click", () => {
+      const schedule = parseSchedule(button.dataset["buildPreset"]!);
+      if (schedule.kind === "times") applySchedule(schedule);
+      builderSays("");
+      runBuild();
+    });
+  }
+
+  const quickTime = el<HTMLInputElement>("#quick-time");
+  const quickDate = el<HTMLInputElement>("#quick-date");
+  const only = (id: FieldId, value: number): FieldChoice => ({ ...everyChoice(id), mode: "specific", values: [value] });
+
+  quickTime.addEventListener("change", () => {
+    const match = /^(\d{2}):(\d{2})/.exec(quickTime.value);
+    if (!match) return;
+    writeChoice("minute", only("minute", Number(match[2])));
+    writeChoice("hour", only("hour", Number(match[1])));
+    builderSays("");
+    runBuild();
+  });
+
+  quickDate.addEventListener("change", () => {
+    const match = /^\d{4,}-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(quickDate.value);
+    if (!match) return;
+    const [month, day, hour, minute] = match.slice(1, 5).map(Number) as [number, number, number, number];
+    writeChoice("minute", only("minute", minute));
+    writeChoice("hour", only("hour", hour));
+    writeChoice("dom", only("dom", day));
+    writeChoice("month", only("month", month));
+    writeChoice("dow", everyChoice("dow"));
+    builderSays("This runs every year on that date — cron has no year field.");
+    runBuild();
+  });
+
+  let commandTimer: number | undefined;
+  commandInput.addEventListener("input", () => {
+    window.clearTimeout(commandTimer);
+    commandTimer = window.setTimeout(runBuild, 140);
+  });
+
+  namesBox.addEventListener("change", () => {
+    remember();
+    runBuild();
+  });
+  userBox.addEventListener("change", () => {
+    remember();
+    runExplain();
+  });
+  zoneSelect.addEventListener("change", () => {
+    remember();
+    paintZoneHint();
+    renderAll();
+  });
+  for (const radio of langRadios) {
+    radio.addEventListener("change", () => {
+      remember();
+      renderAll();
+    });
+  }
+
+  let explainTimer: number | undefined;
+  crontabInput.addEventListener("input", () => {
+    window.clearTimeout(explainTimer);
+    explainTimer = window.setTimeout(runExplain, 140);
+  });
+
+  for (const button of all<HTMLButtonElement>("[data-explain-preset]")) {
+    button.addEventListener("click", () => {
+      crontabInput.value = button.dataset["explainPreset"]!;
+      runExplain();
+    });
+  }
+
+  // Each sample says which kind of file it is, so it brings its own setting
+  // for the user column along with it.
+  const SAMPLE = crontabInput.defaultValue;
+  el<HTMLButtonElement>("#sample-user").addEventListener("click", () => {
+    crontabInput.value = SAMPLE;
+    userBox.checked = false;
+    remember();
+    runExplain();
+  });
+  const systemSample = el<HTMLButtonElement>("#sample-system");
+  systemSample.addEventListener("click", () => {
+    crontabInput.value = systemSample.dataset["sample"] ?? "";
+    userBox.checked = true;
+    remember();
+    runExplain();
+  });
+  el<HTMLButtonElement>("#crontab-clear").addEventListener("click", () => {
+    crontabInput.value = "";
+    runExplain();
+    crontabInput.focus();
+  });
+
+  attachCopy(el<HTMLButtonElement>("#build-copy"), () => built);
+  attachCopy(el<HTMLButtonElement>("#build-line-copy"), () => builtLine);
+  for (const button of all<HTMLButtonElement>("[data-copy-mask]")) {
+    attachCopy(button, () => button.dataset["copyMask"] ?? "");
+  }
+
+  // Relative times drift while the page sits open; a list itself only changes
+  // once the soonest run in it has happened.
+  window.setInterval(() => {
+    const now = Date.now();
+    for (const [clock, rerun] of [
+      [buildClock, runBuild],
+      [explainClock, runExplain],
+    ] as const) {
+      if (now >= clock.soonest) rerun();
+      else for (const item of clock.relatives) item.node.textContent = relativeToNow(item.ms, now);
+    }
+  }, 15_000);
+
+  const opening = parseSchedule("30 8 * * 1-5");
+  if (opening.kind === "times") applySchedule(opening);
+  paintZoneHint();
+  renderAll();
+</script>

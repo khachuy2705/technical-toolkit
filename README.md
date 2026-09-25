@@ -7,7 +7,8 @@ its own origin, and none of them carries anything you typed.
 Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
 **YAML formatter**, **Unicode text spoofer**, **Unicode escape converter** (\u00f4 to ô),
-**epoch converter**, **lunar calendar converter** (âm lịch),
+**epoch converter**, **lunar calendar converter** (âm lịch), **crontab generator & explainer**
+(build a schedule, or paste a crontab and read it in English or Vietnamese, with its next runs),
 **transaction code date decoder** (tra ngày từ mã giao dịch), and a network
 group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
 splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data

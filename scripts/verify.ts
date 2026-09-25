@@ -1,5 +1,6 @@
 import { runToolChecks } from "./verify-tools";
 import { runCertificateChecks } from "./verify-cert";
+import { runCronChecks } from "./verify-cron";
 import { randomInt, shuffle, sample } from "../src/lib/random";
 import { CHAR_CLASSES, AMBIGUOUS_CHARS, stripAmbiguous } from "../src/lib/charsets";
 import {
@@ -324,6 +325,7 @@ console.log("\n-- entropy --");
 
 // The text-transform tools live in their own file; this one owns the harness.
 await runToolChecks(check);
+await runCronChecks(check);
 await runCertificateChecks(check);
 
 console.log("\n-- shipped defaults --");

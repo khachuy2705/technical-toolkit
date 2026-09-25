@@ -75,6 +75,7 @@ src/
 │   ├── epoch.ts           Unix time parsing, civil-date maths, zone conversion
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
 │   ├── txcode.ts          Transaction codes: year + day of year → a date
+│   ├── cron.ts            Crontab: parse, describe (EN/VI), next runs across DST, builder
 │   ├── unicode.ts         Grapheme-safe homoglyph substitution and change records
 │   ├── escape.ts          \uXXXX, \u{…} and \xNN escapes, decode and encode
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
@@ -137,13 +138,14 @@ src/
 │       ├── ipv6-calculator.astro
 │       ├── epoch-converter.astro
 │       ├── lunar-calendar.astro
-│       └── transaction-code-decoder.astro
+│       ├── transaction-code-decoder.astro
+│       └── crontab-generator.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
 ```
 
-Rough scale: 7174 lines of logic in `lib/`, 681 of components and layouts, 6256 of pages, 2099 of
-CSS, 3013 of verification. The wordlist modules are generated and excluded from that count. The
+Rough scale: 8801 lines of logic in `lib/`, 681 of components and layouts, 7663 of pages, 2545 of
+CSS, 3812 of verification. The wordlist modules are generated and excluded from that count. The
 certificate stack (`asn1` through `certgen`) is about 2,500 of the `lib/` total — the largest
 single feature in the project, and the reason §8.6 exists.
 
@@ -226,7 +228,7 @@ entry a `vi` name and tagline too — the Vietnamese page lists every tool in it
 
 ### Tool groups
 
-Sixteen tools do not fit in a header, and a flat grid of them buries related tools among
+Eighteen tools do not fit in a header, and a flat grid of them buries related tools among
 unrelated ones. So every tool belongs to one of five groups — **Network**, **Security**,
 **Data formats**, **Date & time**, **Other** — and the group is what the navigation is built
 from:
@@ -762,7 +764,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   then.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
   `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`, `tt-subnet`, `tt-range`,
-  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`) and restored on the next visit. Output is never stored. A stored value naming
+  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`, `tt-cron`) and restored on the next visit. Output is never stored. A stored value naming
   a wordlist or separator we no longer ship falls back to the default instead of blanking the
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
@@ -772,7 +774,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, and sixteen tools in five groups (§5, *Tool groups*).
+- **Pages** — home, about, privacy, 404, and eighteen tools in five groups (§5, *Tool groups*).
 - **Navigation** — header links to the five groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
@@ -885,6 +887,83 @@ line and column through `lineColumn` (§8.4 uses the same helper for JSON).
 - Checks in `verify-tools.ts` pin the decode of a real Vietnamese payload, surrogate joining,
   quote handling, strict-mode refusals with their offsets, the encoder's output for both styles,
   and a round-trip whose escaped form is also parsed by `JSON.parse` as an oracle.
+
+### 6.20 Crontab generator & explainer — `/tools/crontab-generator/`
+
+Two halves that share a server time zone and a description language:
+
+- **Build** — five field rows (minute, hour, day of month, month, day of week), each with a mode:
+  every value, every N from a start, specific values ticked as chips, or a range with an optional
+  step. Presets fill all five at once; a time box sets the minute and hour, and a date box sets
+  the day and month as well, with a note that cron has no year field, so the date comes round
+  every year. An optional command turns the expression into a whole crontab line.
+- **Explain** — one expression or a whole file: `crontab -l` output, `/etc/crontab` with its user
+  column, `NAME=value` lines, comments and the `@` shorthands. Every line becomes a card — a job
+  (sentence, command, field table, notes, next runs), a setting (what `SHELL`, `PATH`, `MAILTO`,
+  `CRON_TZ`, `TZ` and the rest do to the jobs below them), or an unreadable line with its number
+  and the reason. One bad line does not hide the others. *Edit in builder* loads a job back into
+  the top half.
+
+| Control | Options | Default |
+|---|---|---|
+| Server time zone | every zone the browser knows | the browser's own |
+| Describe schedules in | English / Tiếng Việt | English |
+| Field modes | every, every N, specific, range — day of week has no *every N* | `30 8 * * 1-5` |
+| Write months and weekdays as names | `mon-fri` instead of `1-5` | off |
+| Lines include a user | the `/etc/crontab` and `/etc/cron.d` column | off |
+
+**The page is English; only the description switches.** The sentence under a schedule and the
+*Matches* column of its field table can be written in Vietnamese, because the people reading
+crontabs on this site's servers often read that more easily. It is a tool option rather than a
+page language (§5): notes, errors and chrome stay English, and the two reference tables carry
+both languages and show one.
+
+The dialect is crontab(5) as Vixie cron, cronie and Debian's cron implement it. `lib/cron.ts`
+exists because of three of its rules, each of which a regular-expression reader gets wrong:
+
+- **Day of month and day of week are joined with OR** when both are restricted. `0 0 13 * 5` runs
+  on every 13th and every Friday. The page says so under any schedule that does it, with the
+  `[ "$(date +\%u)" = 5 ] &&` workaround.
+- **"Restricted" is read from the first character.** Cron's `DOM_STAR`/`DOW_STAR` flags are set
+  when a field *begins* with `*`, so `*/2` in the day-of-month field counts as unrestricted and the
+  OR becomes an AND; `1-31/2` means the same days and keeps the OR. `CronField.star` records the
+  character separately from the values, and a note explains it where it bites.
+- **Daylight saving depends on the kind of job.** cronie's main loop runs *fixed-time* jobs for
+  every minute a forward jump skipped, at the jump, and does not repeat them when the clocks go
+  back; jobs whose minute or hour begins with `*` follow the wall clock, losing the skipped hour
+  and running twice in the repeated one. `nextRuns` models exactly that, labels each run a change
+  touched (`gap`, `overlap-once`, `overlap-first`, `overlap-second`), and lists the wall times a
+  wildcard job loses. systemd timers, busybox crond and cloud schedulers differ, and the page
+  says so rather than pretending to speak for them.
+
+Decisions that shape the rest:
+
+- **"Never runs" is a proof, not a timeout.** Days are walked with `civilFromDays` and matched
+  arithmetically; only a matching day asks `Intl` anything, and then only three times — a day
+  before, midday, two days after — to tell a clock-change day from a steady one, so only the
+  former converts each run on its own. The walk stops after 146,097 days, one Gregorian cycle,
+  after which dates and weekdays repeat exactly — so nothing in it means nothing ever.
+  `0 0 30 2 *` is proved in about 3 ms; `0 0 29 2 *` correctly skips 2100.
+- **The sentence is built from the fields as written, not only from their values.** `*/15` reads
+  as "every 15 minutes", `0 9-17` as "every hour from 09:00 to 17:00"; a few fixed minutes and
+  hours become clock times. The field table beside it lists what each field expands to, so the
+  sentence never has to carry every value.
+- **Notes for the mistakes that do not fail loudly:** a step that does not divide its field
+  (`*/7` leaves a four-minute gap at the top of the hour), a day some months lack (skipped, not
+  moved — with the `28-31` plus `date -d tomorrow` idiom for the last day), an unescaped `%` in
+  the command, the non-portable `5/15`, a sixth time field, `root` in a personal crontab, and what
+  a shorthand stands for.
+- **Other schedulers' syntax is refused by name** — Quartz and Spring (`?`, `L`, `W`, `#`, six or
+  seven fields), Jenkins' `H`, Go's `@every`, an upper-case `@DAILY`, a four-letter day name — rather
+  than misread as a crontab.
+- **`CRON_TZ` applies to the lines below it**, as cronie reads it; an unknown zone is dropped and
+  the setting's card says so.
+- **The builder writes the portable form** — `5-59/15`, never `5/15` — and loading a line back
+  never trades `0-59/5` for `*/5`, because that leading `*` is what the second and third rules
+  read. When it cannot keep one (`*/2` in the day-of-week field becomes a list of days), it says so.
+- Only the settings are stored (`tt-cron`: zone, language, names, user column). A crontab or a
+  command can carry paths, addresses and tokens, so neither is ever written to storage.
+- Checks in `verify-cron.ts`, described in §9.
 
 ---
 
@@ -1066,7 +1145,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 791 checks, Node, no browser
+npm run verify   # 1,023 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -1202,6 +1281,16 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
 - **Published reference data** — the nine landmark timestamps and the 33 subnet masks are pinned
   in full, because both tables are rendered at build time and a regression would hand every
   visitor a wrong reference.
+- **Cron** — 232 checks in `verify-cron.ts`. Every operator's expansion is pinned, with the
+  leading-`*` flag asserted apart from the values; 29 refusals by name; 28 descriptions in both
+  languages. The run search is held to an **independent oracle** — its own field expander and a
+  minute-by-minute matcher written again from crontab(5), sharing no code with `cron.ts` — over
+  400 seeded random expressions and the next 800 days. Daylight saving is pinned at New York's
+  2026 transitions and Lord Howe's thirty-minute one, then checked as whole-year properties in
+  three zones: a fixed-time job runs exactly once on each of 365 local days, and `30 * * * *`
+  runs once for every :30 the wall clock shows — none in a gap, two in a repeat. The builder
+  writes 2,000 random settings, each parsed back to exactly the values chosen and read back into
+  the same string.
 
 Run it after touching anything in `src/lib/`.
 
@@ -1246,6 +1335,7 @@ Bundle sizes as built (gzip in brackets):
 | Epoch page script | 11.6 KB (4.8 KB) | epoch page |
 | Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
 | Transaction code page script | 7.7 KB (3.4 KB) | transaction code page |
+| Crontab page script, `cron.ts` included | 33.7 KB (13.1 KB) | crontab page |
 | IPv6 library | 5.3 KB (2.4 KB) | IPv6 page and the three range tools |
 | Range library | 4.9 KB (2.1 KB) | range, aggregator and splitter pages |
 | Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |
@@ -1338,12 +1428,33 @@ Honest list, in rough order of how much they matter:
 17. **No certificate *decoder*.** The ASN.1 reader in `asn1.ts` and `parseCertificate` in
     `x509.ts` already do most of the work the decoder idea in §12 called for, but there is no page
     that takes a PEM and explains it.
+18. **The crontab explainer speaks one dialect, and its DST model has no live witness.** It reads
+    Vixie cron, cronie and Debian's cron; systemd `OnCalendar`, Kubernetes' `timeZone` field and
+    AWS's six-field expressions are not read, and Quartz is refused rather than converted. The
+    daylight-saving behaviour follows cronie's main loop as described in §6.20 and is checked
+    against the zone database and an independent matcher — not against a running cron daemon,
+    which the machine this was built on does not have. Vietnamese covers the sentence and the
+    field meanings only; the run list's relative times ("in 3 days") stay English.
 
 ---
 
 ## 12. Roadmap and ideas
 
 A running record of what was decided, what is done, and what is next. Newest decisions first.
+
+### Decisions on the crontab tool
+
+Made while building §6.20:
+
+| Question | Decision |
+|---|---|
+| One page or two (generator, explainer)? | **One page** — a built line and a pasted one need the same explanation, and *Edit in builder* joins them |
+| Page language | **English**, with the description switchable to **Vietnamese** — a tool option, not a page language |
+| Which dialect? | **crontab(5) as Vixie cron, cronie and Debian ship it**; Quartz, Jenkins and Go syntax refused by name |
+| Next runs around a clock change | **cronie's rules** — fixed-time jobs once, wildcard jobs by the wall clock — each affected run labelled |
+| How far to search before "never"? | **One Gregorian cycle, 146,097 days** — after it the calendar repeats, so the answer is exact |
+| A weekday step in the builder? | **No** — seven chips are quicker, and `*/2` restarts on Sunday in a way nobody means |
+| Remember the crontab between visits? | **No** — only settings; a crontab can carry paths, addresses and tokens |
 
 ### Decisions on the network group
 
@@ -1384,7 +1495,7 @@ Asked and answered before building §6.14:
 | Generators | Password and passphrase generators, entropy readout, bulk mode |
 | Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes, Unicode escape converter |
 | Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
-| Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
+| Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar; crontab generator and explainer with next runs across clock changes |
 | Certificates | Root CA, CA-signed certificates and CSRs; purpose-driven key usage and EKU; PEM, PKCS#12 and JKS export |
 | Site | Tool groups on the home page, group links in the header, sibling strip, Vietnamese chrome for the lunar page |
 
@@ -1418,8 +1529,8 @@ Nothing is half-built. Every tool in the registry marked `live` is complete and 
 
 Collected while planning; all fit the static, nothing-leaves-the-browser constraint in §1.
 
-- **Cron expression explainer** — plain-English reading and the next run times; systemd
-  `OnCalendar` too.
+- ~~**Cron expression explainer**~~ — built as §6.20, with a builder beside it. systemd
+  `OnCalendar` is still not read (gap 18).
 - **chmod / umask calculator** — octal ↔ `rwx` ↔ symbolic, with setuid/setgid/sticky.
 - **Regex tester** — JavaScript dialect, stated as such; matches, named groups, replacement preview.
 - ~~**Certificate / CSR decoder**~~ — promoted to the list above now that §6.14 has written the
