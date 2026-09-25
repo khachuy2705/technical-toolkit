@@ -144,6 +144,23 @@ const FIELD_REFERENCE = [
 ---
 
 <ToolLayout slug="crontab-generator">
+  <nav class="jump" slot="head" aria-label="On this page">
+    <a class="jump__link" href="#builder">
+      <Icon paths={ICONS.arrowDown} size={18} strokeWidth={2} />
+      <span class="jump__text">
+        <span class="jump__name">Generator</span>
+        <span class="jump__hint">Build a schedule from times and dates</span>
+      </span>
+    </a>
+    <a class="jump__link" href="#explainer">
+      <Icon paths={ICONS.arrowDown} size={18} strokeWidth={2} />
+      <span class="jump__text">
+        <span class="jump__name">Explainer</span>
+        <span class="jump__hint">Read a crontab you already have</span>
+      </span>
+    </a>
+  </nav>
+
   <section class="card">
     <div class="controls">
       <div class="field">
@@ -164,7 +181,7 @@ const FIELD_REFERENCE = [
     </div>
   </section>
 
-  <section class="card" id="builder">
+  <section class="card jump-target" id="builder">
     <h2 class="card__title">Build a schedule</h2>
 
     <div class="preset-row" style="margin-top:0">
@@ -308,7 +325,7 @@ const FIELD_REFERENCE = [
     <div id="build-card" class="cron-slot"></div>
   </section>
 
-  <section class="card" id="explainer">
+  <section class="card jump-target" id="explainer">
     <div class="io__head">
       <label class="io__label" for="crontab">Explain a crontab &mdash; one expression, or a whole file</label>
       <span class="io__meta" id="crontab-meta"></span>

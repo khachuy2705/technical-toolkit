@@ -101,7 +101,8 @@ src/
 ├── layouts/
 │   ├── BaseLayout.astro   <head>, SEO, theme no-flash script, header/footer
 │   └── ToolLayout.astro   BaseLayout + breadcrumb, title, privacy badge,
-│                          JSON-LD, "more tools" footer
+│                          JSON-LD, "more tools" footer; a `head` slot
+│                          under the title for a page's own section links
 │
 ├── components/            Presentational. No tool-specific logic.
 │   ├── Header.astro       Links to the four tool groups on the home page
@@ -903,6 +904,12 @@ Two halves that share a server time zone and a description language:
   `CRON_TZ`, `TZ` and the rest do to the jobs below them), or an unreadable line with its number
   and the reason. One bad line does not hide the others. *Edit in builder* loads a job back into
   the top half.
+
+Two links directly under the title — *Generator* and *Explainer* — jump to the two halves, since
+the explainer starts well below the fold. They are plain `#builder` and `#explainer` anchors, so
+they need no script and the back button returns to the top; `.jump-target` gives both sections a
+`scroll-margin-top` so the sticky header does not cover them. They sit in `ToolLayout`'s `head`
+slot, which renders nothing on pages that do not fill it.
 
 | Control | Options | Default |
 |---|---|---|

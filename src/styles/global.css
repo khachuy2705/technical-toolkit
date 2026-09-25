@@ -2106,6 +2106,61 @@ select {
    runs are the only new shapes.
 --------------------------------------------------------------------------- */
 
+/* Links under the title to the page's own halves. Plain anchors, so they work
+   without script and the back button returns to the top. */
+.jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.35rem 0 0.9rem;
+}
+
+.jump__link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex: 1 1 14rem;
+  max-width: 22rem;
+  padding: 0.65rem 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.jump__link:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.jump__link svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.jump__text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.jump__name {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.jump__hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* The sticky header would otherwise cover the top of a section reached by a link. */
+.jump-target {
+  scroll-margin-top: 5rem;
+}
+
 .cron-quick {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));

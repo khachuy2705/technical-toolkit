@@ -42,6 +42,8 @@ const jsonLd = {
 
   <div class="tool-head">
     <h1>{text.name}</h1>
+    {/* Anything a page wants directly under its title, such as links to its own sections. */}
+    <slot name="head" />
     <p>{text.description}</p>
     <span class="privacy-note">
       <svg
