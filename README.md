@@ -4,7 +4,8 @@ A static site collecting small developer and security tools. Everything runs cli
 there is no backend and no database. The only requests the site makes are for its own code from
 its own origin, and none of them carries anything you typed.
 
-Live tools: **password generator**, **passphrase generator**, **certificate & CSR generator**,
+Live tools: **password generator**, **passphrase generator**, **username generator** (Marvel and
+DC hero names), **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
 **YAML formatter**, **Unicode text spoofer**, **Unicode escape converter** (\u00f4 to ô),
 **epoch converter**, **lunar calendar converter** (âm lịch), **crontab generator & explainer**
@@ -72,10 +73,11 @@ src/
 ├── data/site.ts         Site name, URL, description
 ├── data/icons.ts        Shared UI icon paths
 ├── lib/                 Pure logic, no DOM access
-│   ├── random.ts        CSPRNG: unbiased randomInt, shuffle, sample
+│   ├── random.ts        CSPRNG: unbiased randomInt, shuffle, sample, distinctIndices
 │   ├── charsets.ts      Character classes, ambiguous-glyph filter
 │   ├── password.ts      generatePassword + option validation
 │   ├── passphrase.ts    generatePassphrase + wordlist metadata
+│   ├── username.ts      Hero-name usernames: case, spacing, digits, distinct bulk
 │   ├── entropy.ts       Bits, strength tiers, crack-time phrasing
 │   ├── clipboard.ts     Copy with a non-secure-context fallback
 │   ├── ipv4.ts          Address parsing and subnet arithmetic
@@ -102,7 +104,8 @@ src/
 │   ├── format.ts        Shared result type, line/column, deep key sort
 │   ├── ui.ts            DOM helpers used by the tool page scripts
 │   ├── textio.ts        Wiring for the two-pane text tools
-│   └── wordlists/       BIP39, superhero and EFF short, via dynamic import
+│   └── wordlists/       BIP39, superhero and EFF short (dynamic import);
+│                        Marvel and DC heroes for the username page
 ├── layouts/             BaseLayout (head/SEO/theme) and ToolLayout
 ├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel…
 ├── pages/
@@ -160,4 +163,6 @@ styles and a handful of inline `style` attributes.
 Wordlists: the [EFF short diceware list](https://www.eff.org/dice) (1,296 words) and the
 [BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
 (2,048 words), both public domain. The 101-word superhero list is the project's own, kept as
-`src/lib/wordlists/superhero.txt`. Icon geometry follows [Lucide](https://lucide.dev) (ISC).
+`src/lib/wordlists/superhero.txt`. So is the username generator's list of 278 Marvel and DC hero
+names, `src/lib/wordlists/heroes.ts`; the names themselves belong to their publishers. Icon
+geometry follows [Lucide](https://lucide.dev) (ISC).

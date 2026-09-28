@@ -1,7 +1,7 @@
 import { runToolChecks } from "./verify-tools";
 import { runCertificateChecks } from "./verify-cert";
 import { runCronChecks } from "./verify-cron";
-import { randomInt, shuffle, sample } from "../src/lib/random";
+import { distinctIndices, randomInt, shuffle, sample } from "../src/lib/random";
 import { CHAR_CLASSES, AMBIGUOUS_CHARS, stripAmbiguous } from "../src/lib/charsets";
 import {
   buildPool,
@@ -64,6 +64,33 @@ console.log("\n-- shuffle --");
   const worst = Math.max(...positions.map((c) => Math.abs(c - expected) / expected));
   check(`element 0 lands uniformly (worst ${(worst * 100).toFixed(2)}%)`, worst < 0.03, String(positions));
   check("preserves members", shuffle([1, 2, 3, 4, 5]).sort().join() === "1,2,3,4,5");
+}
+
+console.log("\n-- distinctIndices --");
+{
+  // Where the first draw lands and where the second does: a partial shuffle
+  // that forgot a swap would favour some slots, and it shows up in either.
+  const size = 6;
+  const first = new Array(size).fill(0);
+  const second = new Array(size).fill(0);
+  const N = 120_000;
+  for (let i = 0; i < N; i += 1) {
+    const [a, b] = distinctIndices(size, 2);
+    first[a!] += 1;
+    second[b!] += 1;
+  }
+  const expected = N / size;
+  const worst = Math.max(...[...first, ...second].map((c) => Math.abs(c - expected) / expected));
+  check(`first and second draws uniform (worst ${(worst * 100).toFixed(2)}%)`, worst < 0.03, `${first} / ${second}`);
+
+  const draws = Array.from({ length: 300 }, () => distinctIndices(50, 1 + randomInt(50)));
+  check("never repeats a value", draws.every((d) => new Set(d).size === d.length));
+  check("stays in range", draws.every((d) => d.every((v) => Number.isInteger(v) && v >= 0 && v < 50)));
+  check("drawing all of them is a permutation", distinctIndices(40, 40).sort((x, y) => x - y).join() === Array.from({ length: 40 }, (_, i) => i).join());
+  check("drawing none is empty", distinctIndices(10, 0).length === 0);
+  let threw = false;
+  try { distinctIndices(3, 4); } catch { threw = true; }
+  check("asking for more than exist throws", threw);
 }
 
 console.log("\n-- charsets --");

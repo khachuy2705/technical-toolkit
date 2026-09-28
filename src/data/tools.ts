@@ -119,6 +119,27 @@ export const TOOLS: readonly Tool[] = [
     vi: { name: 'Tạo cụm mật khẩu', tagline: 'Cụm từ kiểu diceware, dễ nhớ.' },
   },
   {
+    slug: 'username-generator',
+    name: 'Username Generator',
+    tagline: 'Random usernames from Marvel and DC heroes.',
+    description:
+      'Generate random usernames from the names of Marvel and DC superheroes. Write them lowercase or capitalised, joined or with spaces, and add one or two digits for when the plain name is taken.',
+    keywords: [
+      'username generator',
+      'random username',
+      'superhero username',
+      'marvel username',
+      'dc username',
+      'nickname generator',
+      'tao username ngau nhien',
+      'ten sieu anh hung',
+    ],
+    icon: '<path d="M18 11c-1.5 0-2.5.5-3 2"/><path d="M4 6a2 2 0 0 0-2 2v4a5 5 0 0 0 5 5 8 8 0 0 1 5 2 8 8 0 0 1 5-2 5 5 0 0 0 5-5V8a2 2 0 0 0-2-2h-3a8 8 0 0 0-5 2 8 8 0 0 0-5-2z"/><path d="M6 11c1.5 0 2.5.5 3 2"/>',
+    status: 'live',
+    group: 'security',
+    vi: { name: 'Tạo username', tagline: 'Username ngẫu nhiên từ tên siêu anh hùng Marvel và DC.' },
+  },
+  {
     slug: 'hash-generator',
     name: 'Hash Generator',
     tagline: 'MD5, SHA-256 and SHA-512 over text or a file.',

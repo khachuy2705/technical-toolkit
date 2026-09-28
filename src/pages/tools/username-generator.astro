@@ -1,0 +1,299 @@
+---
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import OutputPanel from "../../components/OutputPanel.astro";
+import BulkPanel from "../../components/BulkPanel.astro";
+import { BULK_MAX, DEFAULT_USERNAME_OPTIONS, UNIVERSES } from "../../lib/username";
+
+const d = DEFAULT_USERNAME_OPTIONS;
+
+// A few names each list is known by, shown beside its tick box.
+const SAMPLES: Record<string, string> = {
+  marvel: "Spider Man, Storm, Iron Fist…",
+  dc: "Batman, Raven, Green Arrow…",
+};
+
+const LETTER_CASES = [
+  { id: "lower", label: "lowercase" },
+  { id: "capital", label: "Capitalised" },
+] as const;
+
+const SPACINGS = [
+  { id: "joined", label: "Joined" },
+  { id: "spaced", label: "With spaces" },
+] as const;
+
+const DIGITS = [
+  { id: 0, label: "None" },
+  { id: 1, label: "1 digit" },
+  { id: 2, label: "2 digits" },
+] as const;
+
+const total = UNIVERSES.reduce((sum, u) => sum + u.heroes.length, 0);
+---
+
+<ToolLayout slug="username-generator">
+  <OutputPanel placeholder="—" generateLabel="Regenerate" strength={false} />
+
+  <section class="card">
+    <h2 class="card__title">Options</h2>
+
+    <div class="controls">
+      <fieldset class="field field--plain">
+        <legend class="field__label">Heroes from</legend>
+        <div class="field__group">
+          {
+            UNIVERSES.map((u) => (
+              <label class="check">
+                <input type="checkbox" data-universe={u.id} checked={d.universes.includes(u.id)} />
+                <span class="check__text">
+                  {u.label} &middot; {u.heroes.length} heroes
+                  <span class="check__sample">{SAMPLES[u.id]}</span>
+                </span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="field__hint" id="space-hint"></p>
+      </fieldset>
+
+      <div class="field">
+        <span class="field__label" id="letter-case-label">Letters</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="letter-case-label">
+          {
+            LETTER_CASES.map((c) => (
+              <label>
+                <input type="radio" name="letter-case" value={c.id} checked={c.id === d.letterCase} />
+                <span>{c.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="field__hint">Capitalised starts every word with a capital: SpiderMan.</p>
+      </div>
+
+      <div class="field">
+        <span class="field__label" id="spacing-label">Words</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="spacing-label">
+          {
+            SPACINGS.map((s) => (
+              <label>
+                <input type="radio" name="spacing" value={s.id} checked={s.id === d.spacing} />
+                <span>{s.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="field__hint">For sites that allow a space in a display name: Spider Man.</p>
+      </div>
+
+      <div class="field">
+        <span class="field__label" id="digits-label">Digits at the end</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="digits-label">
+          {
+            DIGITS.map((n) => (
+              <label>
+                <input type="radio" name="digits" value={n.id} checked={n.id === d.digits} />
+                <span>{n.label}</span>
+              </label>
+            ))
+          }
+        </div>
+        <p class="field__hint">For when the plain name is already taken: spiderman42.</p>
+      </div>
+    </div>
+  </section>
+
+  <BulkPanel filename="usernames.txt" max={BULK_MAX} />
+
+  <section class="card prose">
+    <h2>How a name is written</h2>
+    <p>
+      Every hero is kept as its words — Spider-Man as <code>Spider Man</code>, Shang-Chi as
+      <code>Shang Chi</code> — so the two switches combine freely:
+      <code>spiderman</code>, <code>SpiderMan</code>, <code>spider man</code> and
+      <code>Spider Man</code>. Hyphens and full stops in the original names are dropped, because
+      most sign-up forms refuse them.
+    </p>
+
+    <h2>Digits at the end</h2>
+    <p>
+      A bare hero name is almost certainly taken on any large site. One digit gives each hero ten
+      endings and two digits a hundred; two digits are always two, <code>00</code> to
+      <code>99</code>, so every name in a list is the same length. With spaces on, the digits are a
+      word of their own: <code>Spider Man 42</code>.
+    </p>
+    <p>
+      The line under <em>Heroes from</em> counts how many different usernames the settings can
+      produce. There is no strength meter: a username is not a secret, so what matters is how many
+      there are to choose from, not how hard one is to guess.
+    </p>
+
+    <h2>In bulk</h2>
+    <p>
+      A bulk list never repeats a username. Marvel and DC each have more than {BULK_MAX} heroes
+      here, so even with no digits and one universe ticked, a list of {BULK_MAX} is all different
+      names.
+    </p>
+
+    <h2>The heroes</h2>
+    <p>
+      Heroes and the heroic side of the antiheroes, by codename — no villains and no civilian
+      names. Every draw comes from the browser&rsquo;s cryptographic random number generator, like
+      everything else on this site.
+    </p>
+    <details class="heroes">
+      <summary>All {total} names</summary>
+      {
+        UNIVERSES.map((u) => (
+          <p>
+            <b>{u.label} ({u.heroes.length}):</b> {u.heroes.join(", ")}
+          </p>
+        ))
+      }
+    </details>
+  </section>
+</ToolLayout>
+
+<style>
+  .field--plain {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    min-inline-size: 0;
+  }
+  .field--plain legend {
+    padding: 0;
+  }
+  .heroes {
+    margin-top: 0.7rem;
+  }
+  .heroes summary {
+    cursor: pointer;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .heroes p {
+    margin-top: 0.7rem;
+  }
+  .heroes b {
+    color: var(--text);
+  }
+</style>
+
+<script>
+  import {
+    DEFAULT_USERNAME_OPTIONS,
+    UNIVERSES,
+    endingCount,
+    generateUsername,
+    generateUsernames,
+    heroesFor,
+    usernameSpace,
+    validateUsernameOptions,
+    type DigitCount,
+    type LetterCase,
+    type Spacing,
+    type Universe,
+    type UsernameOptions,
+  } from "../../lib/username";
+  import { all, attachBulk, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+  import { ICONS } from "../../data/icons";
+
+  const PREFS_KEY = "tt-username";
+
+  const universeBoxes = all<HTMLInputElement>("[data-universe]");
+  const hint = el<HTMLElement>("#space-hint");
+  const result = el<HTMLOutputElement>("#result");
+  const errorBox = el<HTMLParagraphElement>("#result-error");
+
+  const KNOWN_UNIVERSES = new Set(UNIVERSES.map((u) => u.id));
+
+  function checkedValue(name: string): string {
+    return el<HTMLInputElement>(`input[name="${name}"]:checked`).value;
+  }
+
+  /** Ticks the radio holding `value`, and reports whether one did. */
+  function setRadio(name: string, value: unknown): boolean {
+    const input = all<HTMLInputElement>(`input[name="${name}"]`).find(
+      (i) => i.value === String(value),
+    );
+    if (input) input.checked = true;
+    return Boolean(input);
+  }
+
+  function readOptions(): UsernameOptions {
+    return {
+      universes: universeBoxes
+        .filter((b) => b.checked)
+        .map((b) => b.dataset["universe"] as Universe),
+      letterCase: checkedValue("letter-case") as LetterCase,
+      spacing: checkedValue("spacing") as Spacing,
+      digits: Number(checkedValue("digits")) as DigitCount,
+    };
+  }
+
+  function restore(): void {
+    const d = DEFAULT_USERNAME_OPTIONS;
+    const prefs = loadPrefs(PREFS_KEY, d);
+
+    // A list we no longer ship is dropped; an empty selection falls back to the
+    // default rather than greeting the visitor with an error.
+    const saved = Array.isArray(prefs.universes)
+      ? prefs.universes.filter((id): id is Universe => KNOWN_UNIVERSES.has(id as Universe))
+      : [];
+    const ids = saved.length > 0 ? saved : d.universes;
+    for (const box of universeBoxes) {
+      box.checked = ids.includes(box.dataset["universe"] as Universe);
+    }
+
+    if (!setRadio("letter-case", prefs.letterCase)) setRadio("letter-case", d.letterCase);
+    if (!setRadio("spacing", prefs.spacing)) setRadio("spacing", d.spacing);
+    if (!setRadio("digits", prefs.digits)) setRadio("digits", d.digits);
+  }
+
+  /** How many usernames the settings allow, said as the multiplication it is. */
+  function describeSpace(opts: UsernameOptions): string {
+    const heroes = heroesFor(opts.universes).length;
+    if (heroes === 0) return "No heroes selected.";
+    const space = usernameSpace(opts).toLocaleString("en-US");
+    if (opts.digits === 0) return `${space} possible usernames, one per hero.`;
+    const endings = endingCount(opts.digits);
+    return `${heroes} heroes × ${endings} endings = ${space} possible usernames.`;
+  }
+
+  function paint(): void {
+    const options = readOptions();
+    savePrefs(PREFS_KEY, options);
+    hint.textContent = describeSpace(options);
+
+    const problem = validateUsernameOptions(options);
+    if (problem) {
+      errorBox.textContent = problem;
+      errorBox.hidden = false;
+      result.textContent = "—";
+      result.dataset["empty"] = "true";
+      return;
+    }
+
+    result.textContent = generateUsername(options);
+    delete result.dataset["empty"];
+    errorBox.hidden = true;
+  }
+
+  restore();
+  paint();
+
+  for (const input of all<HTMLInputElement>("[data-universe], input[type='radio']")) {
+    input.addEventListener("change", paint);
+  }
+  el<HTMLButtonElement>("#regenerate").addEventListener("click", paint);
+  attachCopy(el<HTMLButtonElement>("#copy"), () =>
+    result.dataset["empty"] ? "" : (result.textContent ?? ""),
+  );
+
+  attachBulk({
+    generate: (count) => generateUsernames(readOptions(), count),
+    filename: "usernames.txt",
+    copyIcon: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS.copy}</svg>`,
+  });
+</script>

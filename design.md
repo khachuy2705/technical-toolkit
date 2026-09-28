@@ -64,10 +64,12 @@ src/
 │   └── icons.ts           Shared UI icon path data
 │
 ├── lib/                   Pure logic. NEVER touches the DOM. See §4.
-│   ├── random.ts          CSPRNG primitives: randomInt, pick, sample, shuffle
+│   ├── random.ts          CSPRNG primitives: randomInt, pick, sample, shuffle,
+│   │                      distinctIndices
 │   ├── charsets.ts        Character classes, ambiguous-glyph filter
 │   ├── password.ts        generatePassword + option validation
 │   ├── passphrase.ts      generatePassphrase + wordlist metadata
+│   ├── username.ts        Usernames from hero names: case, spacing, digits
 │   ├── entropy.ts         Bits, strength tiers, crack-time phrasing
 │   ├── ipv4.ts            Address parsing and subnet arithmetic
 │   ├── ipv6.ts            IPv6 parsing, RFC 5952 text, types, ip6.arpa (bigint)
@@ -96,7 +98,8 @@ src/
 │   ├── clipboard.ts       Copy, with a non-secure-context fallback
 │   ├── ui.ts              DOM helpers. See §4.
 │   ├── textio.ts          DOM wiring for the two-pane text tools. See §4.
-│   └── wordlists/         BIP39, superhero and EFF short as string modules
+│   └── wordlists/         BIP39, superhero and EFF short as string modules;
+│                          heroes.ts, Marvel and DC names by word
 │
 ├── layouts/
 │   ├── BaseLayout.astro   <head>, SEO, theme no-flash script, header/footer
@@ -112,7 +115,7 @@ src/
 │   ├── Icon.astro         Renders 24×24 stroked SVG from path data
 │   ├── ToolCard.astro     Home page / "more tools" card
 │   ├── RangeField.astro   Slider + typed number box + step buttons
-│   ├── OutputPanel.astro  Result box + copy + regenerate + strength meter
+│   ├── OutputPanel.astro  Result box + copy + regenerate + optional strength meter
 │   ├── BulkPanel.astro    Count, generate, copy-all, download, per-row copy
 │   └── IoPanel.astro      Input/output textareas for the text tools
 │
@@ -126,6 +129,7 @@ src/
 │   └── tools/
 │       ├── password-generator.astro
 │       ├── passphrase-generator.astro
+│       ├── username-generator.astro
 │       ├── unicode-spoofer.astro
 │       ├── base64.astro
 │       ├── hash-generator.astro
@@ -229,7 +233,7 @@ entry a `vi` name and tagline too — the Vietnamese page lists every tool in it
 
 ### Tool groups
 
-Eighteen tools do not fit in a header, and a flat grid of them buries related tools among
+Nineteen tools do not fit in a header, and a flat grid of them buries related tools among
 unrelated ones. So every tool belongs to one of five groups — **Network**, **Security**,
 **Data formats**, **Date & time**, **Other** — and the group is what the navigation is built
 from:
@@ -747,6 +751,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   scrolls the page sideways.
 - **Strength meter** — five segments, coloured by tier, plus the raw bit count and an average
   brute-force time. Tiers: Very weak `<36`, Weak `<56`, Fair `<72`, Strong `<96`, Excellent `≥96`.
+  `OutputPanel strength={false}` leaves it out, for output that is not a secret (§6.21).
 - **Copy** — `navigator.clipboard` with a `execCommand` fallback for non-secure contexts, a
   transient "Copied" label, and an ARIA live region so the flash is announced.
 - **Bulk panel** — count, generate, copy all, download `.txt`, per-row copy.
@@ -765,7 +770,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   then.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
   `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`, `tt-subnet`, `tt-range`,
-  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`, `tt-cron`) and restored on the next visit. Output is never stored. A stored value naming
+  `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`, `tt-cron`, `tt-username`) and restored on the next visit. Output is never stored. A stored value naming
   a wordlist or separator we no longer ship falls back to the default instead of blanking the
   select. **Changing a default means bumping the key**: `loadPrefs` merges defaults under the saved
   object, so returning visitors would otherwise keep the old default forever.
@@ -775,7 +780,7 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, and eighteen tools in five groups (§5, *Tool groups*).
+- **Pages** — home, about, privacy, 404, and nineteen tools in five groups (§5, *Tool groups*).
 - **Navigation** — header links to the five groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
@@ -972,6 +977,42 @@ Decisions that shape the rest:
   command can carry paths, addresses and tokens, so neither is ever written to storage.
 - Checks in `verify-cron.ts`, described in §9.
 
+### 6.21 Username generator — `/tools/username-generator/`
+
+A random username made from a Marvel or DC superhero name, one on top and up to a hundred in the
+bulk panel. It sits in the Security group beside the password and passphrase generators, because
+those are the three things a sign-up form asks for.
+
+| Control | Options | Default |
+|---|---|---|
+| Heroes from | Marvel (150), DC (128) — either or both | **both** |
+| Letters | lowercase / Capitalised (first letter of every word) | lowercase |
+| Words | Joined / With spaces | Joined |
+| Digits at the end | none / 1 digit (0–9) / 2 digits (00–99) | none |
+| Bulk count | 1 – 100 | 10 |
+
+- **The list stores words, not strings.** `wordlists/heroes.ts` keeps every hero as its words in
+  Title Case — Spider-Man as `Spider Man`, Ms. Marvel as `Ms Marvel` — so the two switches combine
+  freely: `spiderman`, `SpiderMan`, `spider man`, `Spider Man`. The passphrase page's superhero
+  list could not be reused: it stores `spiderman` as one word and mixes in heroes from other
+  publishers. Heroes and the heroic side of the antiheroes, by codename; no villains and no
+  civilian names.
+- **Two digits are always two.** `07`, not `7`, so a list of names is one length and the space is
+  exactly heroes × 100. In spaced mode the digits are a word of their own — `Spider Man 42` — so the
+  spacing reads the same all the way along.
+- **A bulk list never repeats.** The hero and the ending are drawn together as one index into
+  heroes × endings, through `distinctIndices` (a Fisher-Yates stopped after *n* steps, kept sparse
+  in a map), rather than drawn one by one and retried on a clash. Each universe holds at least
+  `BULK_MAX` heroes, asserted in the suite, so even one universe with no digits fills a list of 100.
+  Asking for more than the settings allow returns all of them once.
+- **No strength meter.** A username is not a secret; `OutputPanel` takes `strength={false}`. What
+  the page counts instead is the space — `278 heroes × 100 endings = 27,800 possible usernames` —
+  because that is what decides how often a name comes back taken.
+- **Spellings cannot collide.** The suite asserts every name is unique within and across the two
+  lists once lowercased and joined, the coarsest of the four spellings, so two heroes never
+  produce the same username.
+- Only the four settings are stored (`tt-username`); generated names are not.
+
 ---
 
 ## 7. Design system
@@ -1152,7 +1193,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 1,023 checks, Node, no browser
+npm run verify   # 1,063 checks, Node, no browser
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -1161,6 +1202,8 @@ npm run build    # runs check first, then the static build
 
 - **RNG uniformity** — 600,000 draws of `randomInt(6)` stay within 2% of expectation;
   120,000 shuffles place a given element uniformly.
+  `distinctIndices` puts its first and second draws uniformly over 120,000 runs, never repeats, and
+  drawing every index is a permutation.
 - **Shipped defaults** — that the passphrase tool really does default to the superhero list with a
   digit appended, printing the resulting bit count so a weak default cannot go unnoticed.
 - **Structural properties** — length, character-class membership, the shuffle actually shuffling,
@@ -1298,6 +1341,11 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
   runs once for every :30 the wall clock shows — none in a gap, two in a repeat. The builder
   writes 2,000 random settings, each parsed back to exactly the values chosen and read back into
   the same string.
+- **Usernames** — the hero list's rules (one to three `[A-Z][a-z]+` words, no name twice once
+  lowercased and joined, at least 100 per universe), the four spellings and where the digits go in
+  each, the shape of 300 draws under six settings, each universe drawing only its own heroes, bulk
+  lists that never repeat, all hundred two-digit endings reached with the leading zero kept, and
+  one-digit endings uniform over 100,000 draws.
 
 Run it after touching anything in `src/lib/`.
 
@@ -1346,6 +1394,7 @@ Bundle sizes as built (gzip in brackets):
 | IPv6 library | 5.3 KB (2.4 KB) | IPv6 page and the three range tools |
 | Range library | 4.9 KB (2.1 KB) | range, aggregator and splitter pages |
 | Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |
+| Username page script, hero list included | 6.1 KB (2.9 KB) | username page |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
 | EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
@@ -1449,6 +1498,20 @@ Honest list, in rough order of how much they matter:
 
 A running record of what was decided, what is done, and what is next. Newest decisions first.
 
+### Decisions on the username generator
+
+Made while building §6.21:
+
+| Question | Decision |
+|---|---|
+| Reuse the passphrase page's superhero list? | **No** — it stores `spiderman` as one word, so it cannot be spaced, and mixes in other publishers |
+| Which group? | **Security**, beside the password and passphrase generators — the three a sign-up form asks for |
+| Capitalised joined: `Spiderman` or `SpiderMan`? | **`SpiderMan`** — the spaced form with the spaces taken out, and readable |
+| Two digits: `7` or `07`? | **`07`** — one length for every name, and exactly heroes × 100 |
+| Digits in spaced mode | **A word of their own**: `Spider Man 42` |
+| Default | **lowercase, joined, no digits** — the plain name first; digits are for when it is taken |
+| Strength meter? | **No** — a username is not a secret; the page counts the possible usernames instead |
+
 ### Decisions on the crontab tool
 
 Made while building §6.20:
@@ -1499,7 +1562,7 @@ Asked and answered before building §6.14:
 
 | Area | What |
 |---|---|
-| Generators | Password and passphrase generators, entropy readout, bulk mode |
+| Generators | Password and passphrase generators, entropy readout, bulk mode; username generator from Marvel and DC hero names |
 | Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes, Unicode escape converter |
 | Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
 | Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar; crontab generator and explainer with next runs across clock changes |

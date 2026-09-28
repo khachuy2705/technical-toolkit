@@ -6,9 +6,11 @@ interface Props {
   /** Placeholder shown before the first generation. */
   placeholder: string;
   generateLabel?: string;
+  /** The entropy meter. Off for output that is not a secret, such as a username. */
+  strength?: boolean;
 }
 
-const { placeholder, generateLabel = "Generate" } = Astro.props;
+const { placeholder, generateLabel = "Generate", strength = true } = Astro.props;
 ---
 
 <section class="output" aria-labelledby="output-heading">
@@ -29,18 +31,22 @@ const { placeholder, generateLabel = "Generate" } = Astro.props;
     </button>
   </div>
 
-  <div class="strength" id="strength" data-level="0">
-    <div class="strength__bar" aria-hidden="true">
-      <span class="strength__seg"></span>
-      <span class="strength__seg"></span>
-      <span class="strength__seg"></span>
-      <span class="strength__seg"></span>
-      <span class="strength__seg"></span>
-    </div>
-    <div class="strength__meta">
-      <span class="strength__label" data-strength-label>Very weak</span>
-      <span><b data-strength-bits>0</b> bits of entropy</span>
-      <span>Offline brute force: <b data-strength-time>instantly</b></span>
-    </div>
-  </div>
+  {
+    strength && (
+      <div class="strength" id="strength" data-level="0">
+        <div class="strength__bar" aria-hidden="true">
+          <span class="strength__seg"></span>
+          <span class="strength__seg"></span>
+          <span class="strength__seg"></span>
+          <span class="strength__seg"></span>
+          <span class="strength__seg"></span>
+        </div>
+        <div class="strength__meta">
+          <span class="strength__label" data-strength-label>Very weak</span>
+          <span><b data-strength-bits>0</b> bits of entropy</span>
+          <span>Offline brute force: <b data-strength-time>instantly</b></span>
+        </div>
+      </div>
+    )
+  }
 </section>

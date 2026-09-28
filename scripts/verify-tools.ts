@@ -29,6 +29,19 @@ import {
 } from "../src/lib/txcode";
 import { lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
+  BULK_MAX,
+  DEFAULT_USERNAME_OPTIONS,
+  UNIVERSES,
+  formatUsername,
+  generateUsername,
+  generateUsernames,
+  heroesFor,
+  usernameSpace,
+  validateUsernameOptions,
+  type UsernameOptions,
+} from "../src/lib/username";
+import { DC_HEROES, MARVEL_HEROES } from "../src/lib/wordlists/heroes";
+import {
   availableZones,
   civilFromDays,
   dayOfYear,
@@ -1448,5 +1461,92 @@ export async function runToolChecks(check: Check): Promise<void> {
 
     const empty = await convertYaml("   ", { mode: "format", indent: 2, sortKeys: false });
     check("empty input yields empty output", empty.ok && empty.output === "");
+  }
+
+  console.log("\n-- username generator --");
+  {
+    // The list: the rules an edit to heroes.ts has to keep.
+    const everyHero = [...MARVEL_HEROES, ...DC_HEROES];
+    const badWords = everyHero.filter((h) => !/^[A-Z][a-z]+( [A-Z][a-z]+){0,2}$/.test(h));
+    check("every hero is one to three [A-Z][a-z]+ words", badWords.length === 0, JSON.stringify(badWords));
+    // Joined lowercase is the coarsest spelling, so unique there means unique in all four.
+    const key = (h: string) => h.toLowerCase().replaceAll(" ", "");
+    const seen = new Map<string, string>();
+    const clashes: string[] = [];
+    for (const h of everyHero) {
+      const k = key(h);
+      if (seen.has(k)) clashes.push(`${seen.get(k)} / ${h}`);
+      seen.set(k, h);
+    }
+    check("no hero repeats within or across the lists", clashes.length === 0, clashes.join(", "));
+    check(`each universe holds at least ${BULK_MAX} heroes`, UNIVERSES.every((u) => u.heroes.length >= BULK_MAX), UNIVERSES.map((u) => `${u.id} ${u.heroes.length}`).join(", "));
+    check("both universes together are the two lists, Marvel first", heroesFor(["dc", "marvel"]).join() === everyHero.join());
+    check("no universe is no heroes", heroesFor([]).length === 0);
+    console.log(`     heroes: ${MARVEL_HEROES.length} Marvel + ${DC_HEROES.length} DC = ${everyHero.length}`);
+
+    // The four spellings, and where the digits go in each.
+    const f = (letterCase: "lower" | "capital", spacing: "joined" | "spaced", ending = "") =>
+      formatUsername("Spider Man", ending, { letterCase, spacing });
+    check("lowercase, joined", f("lower", "joined") === "spiderman", f("lower", "joined"));
+    check("capitalised, joined", f("capital", "joined") === "SpiderMan", f("capital", "joined"));
+    check("lowercase, spaced", f("lower", "spaced") === "spider man", f("lower", "spaced"));
+    check("capitalised, spaced", f("capital", "spaced") === "Spider Man", f("capital", "spaced"));
+    check("joined digits sit flush", f("capital", "joined", "42") === "SpiderMan42", f("capital", "joined", "42"));
+    check("spaced digits are a word of their own", f("lower", "spaced", "07") === "spider man 07", f("lower", "spaced", "07"));
+    check("a one-word hero is untouched by spacing", formatUsername("Thor", "", { letterCase: "capital", spacing: "spaced" }) === "Thor");
+    check("three words stay three", formatUsername("Beta Ray Bill", "", { letterCase: "capital", spacing: "joined" }) === "BetaRayBill");
+
+    // Generation, one setting at a time.
+    const base: UsernameOptions = { ...DEFAULT_USERNAME_OPTIONS };
+    const shapes: [Partial<UsernameOptions>, RegExp][] = [
+      [{}, /^[a-z]+$/],
+      [{ letterCase: "capital" }, /^([A-Z][a-z]+)+$/],
+      [{ spacing: "spaced" }, /^[a-z]+( [a-z]+)*$/],
+      [{ digits: 1 }, /^[a-z]+\d$/],
+      [{ digits: 2 }, /^[a-z]+\d\d$/],
+      [{ letterCase: "capital", spacing: "spaced", digits: 2 }, /^[A-Z][a-z]+( [A-Z][a-z]+)* \d\d$/],
+    ];
+    for (const [change, shape] of shapes) {
+      const names = Array.from({ length: 300 }, () => generateUsername({ ...base, ...change }));
+      const odd = names.find((n) => !shape.test(n));
+      check(`${JSON.stringify(change)} gives ${shape}`, odd === undefined, odd);
+    }
+
+    const marvelOnly = new Set(MARVEL_HEROES.map(key));
+    const fromMarvel = generateUsernames({ ...base, universes: ["marvel"] }, BULK_MAX);
+    check("Marvel alone draws only Marvel heroes", fromMarvel.every((n) => marvelOnly.has(n)), fromMarvel.find((n) => !marvelOnly.has(n)));
+    const dcOnly = new Set(DC_HEROES.map(key));
+    const fromDc = generateUsernames({ ...base, universes: ["dc"] }, BULK_MAX);
+    check("DC alone draws only DC heroes", fromDc.every((n) => dcOnly.has(n)), fromDc.find((n) => !dcOnly.has(n)));
+
+    // Distinct in bulk, and every setting's full space reachable.
+    for (const digits of [0, 1, 2] as const) {
+      const opts = { ...base, universes: ["dc"] as const, digits };
+      const list = generateUsernames(opts, BULK_MAX);
+      check(`a bulk list of ${BULK_MAX} never repeats (digits: ${digits})`, list.length === BULK_MAX && new Set(list).size === BULK_MAX, String(list.length));
+    }
+    const space = usernameSpace({ ...base, universes: ["dc"], digits: 1 });
+    check("DC with one digit is heroes × 10", space === DC_HEROES.length * 10, String(space));
+    const everything = generateUsernames({ ...base, universes: ["dc"], digits: 1 }, space + 50);
+    check("asking past the space returns all of it once", everything.length === space && new Set(everything).size === space, String(everything.length));
+    const twoDigitSpace = usernameSpace({ ...base, universes: ["dc"], digits: 2 });
+    const twoDigitEndings = new Set(generateUsernames({ ...base, universes: ["dc"], digits: 2 }, twoDigitSpace).map((n) => n.slice(-2)));
+    check("two digits reach all hundred endings, 00 to 09 included", twoDigitEndings.size === 100 && twoDigitEndings.has("00") && twoDigitEndings.has("07"), String(twoDigitEndings.size));
+    check("the default space is heroes × 1", usernameSpace(base) === everyHero.length, String(usernameSpace(base)));
+    check("two digits is heroes × 100", usernameSpace({ ...base, digits: 2 }) === everyHero.length * 100);
+
+    // Every ending equally likely: count them over many single draws.
+    const endings = new Array(10).fill(0);
+    const N = 100_000;
+    for (let i = 0; i < N; i += 1) endings[Number(generateUsername({ ...base, digits: 1 }).slice(-1))] += 1;
+    const worst = Math.max(...endings.map((c) => Math.abs(c - N / 10) / (N / 10)));
+    check(`one-digit endings are uniform (worst ${(worst * 100).toFixed(2)}%)`, worst < 0.04, String(endings));
+
+    check("no universe is refused by name", validateUsernameOptions({ ...base, universes: [] }) === "Pick Marvel, DC or both.");
+    let threw = false;
+    try { generateUsernames({ ...base, universes: [] }, 3); } catch { threw = true; }
+    check("generating with no universe throws", threw);
+    check("a stray digit count is refused", validateUsernameOptions({ ...base, digits: 3 as 0 }) !== null);
+    check("a count of zero is an empty list", generateUsernames(base, 0).length === 0);
   }
 }

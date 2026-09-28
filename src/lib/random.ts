@@ -49,6 +49,27 @@ export function sample<T>(items: readonly T[], count: number): T[] {
 }
 
 /**
+ * `count` distinct integers from `[0, size)`, in random order.
+ *
+ * A Fisher-Yates shuffle stopped after `count` steps, over an array that is
+ * never built: the map holds only the slots a swap has touched. Every ordered
+ * selection is equally likely, and the cost follows `count`, not `size`.
+ */
+export function distinctIndices(size: number, count: number): number[] {
+  if (!Number.isInteger(count) || count < 0 || count > size) {
+    throw new RangeError(`distinctIndices: cannot draw ${count} distinct values from ${size}`);
+  }
+  const moved = new Map<number, number>();
+  const out: number[] = new Array(count);
+  for (let i = 0; i < count; i += 1) {
+    const j = i + randomInt(size - i);
+    out[i] = moved.get(j) ?? j;
+    moved.set(j, moved.get(i) ?? i);
+  }
+  return out;
+}
+
+/**
  * Fisher-Yates shuffle, in place, driven by the CSPRNG.
  *
  * Used to hide positional structure: without it, a password built as
