@@ -388,6 +388,31 @@ page; there is no message catalogue, because no page exists in two languages. Th
   protocol confirmed the two layers overlap glyph for glyph, including wrapped lines, accented text
   and emoji, and after scrolling. Base64 and YAML use the same panel without the layer and are
   unchanged.
+- **Open a file instead of pasting.** An *Open file* button beside Sample, and dropping a file
+  anywhere on the input pane, both load the file into the input and format it at once. It is
+  `IoPanel openFile="…"` — the value is the picker's `accept` filter (`.json`, `.txt`), which is a
+  hint only — so another text tool can opt in with one prop. Details:
+  - **Encoding by byte-order mark.** `decodeText` in `lib/format.ts` reads UTF-8, and UTF-16 LE/BE
+    when the file starts with the matching mark — Windows PowerShell 5.1 writes UTF-16 LE with `>`,
+    and read as UTF-8 that is a NUL between every character. The mark is dropped either way.
+  - **10 MB cap** (`OPEN_FILE_LIMIT`). A bigger file is refused with its size, and what was in the
+    input stays. The reason is written in the input's meta line, beside the button, in the error
+    colour and through the live region — not in the error line, which sits below two 30rem panes
+    and would be off screen when the button is pressed.
+  - **Only file drags are intercepted.** Dragging selected text into the textarea is the
+    browser's own. A dashed accent outline marks the textarea while a file is over the pane,
+    counted across `dragenter`/`dragleave` so crossing into a child does not flicker it off.
+  - **A near miss is refused, not opened.** Inviting a drop makes one land beside the input
+    sometimes, and the browser's default for a dropped file is to open it in place of the page,
+    losing what was typed. Outside the pane a file drag gets `dropEffect = "none"` and its drop is
+    swallowed. Pages without `openFile` do not register the guard.
+
+  Driven in headless Chrome over CDP: the button through an intercepted file chooser (the same
+  file twice, UTF-8 with accents, UTF-16 LE, a broken file naming line 3, an 11 MB refusal that
+  keeps the typed input), a real drag onto the textarea, out of the pane and onto the output pane
+  (`copy` over the input, `none` beside it), and 390px with no sideways scroll. CDP's synthetic
+  drop does not trigger the browser's open-the-file navigation even on an unguarded page, so the
+  guard was checked by its effect on real `DragEvent`s instead.
 
 ### 6.6 YAML formatter — `/tools/yaml-formatter/`
 
@@ -767,7 +792,8 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   generation counter, so an async result (the first YAML parse, which waits on an import) can
   never overwrite a newer one. An `onEmpty` hook lets a page clear anything it drew outside the
   panes — the aggregator's report — when the input is emptied, since the transform does not run
-  then.
+  then. An `openFile` prop adds *Open file* and drop-to-load to the input pane (§6.5); only the
+  JSON formatter sets it.
 - **Settings persistence** — every control is saved to `localStorage` (`tt-password`,
   `tt-passphrase-v3`, `tt-base64`, `tt-hash`, `tt-json`, `tt-yaml`, `tt-subnet`, `tt-range`,
   `tt-aggregate`, `tt-split`, `tt-ipv6`, `tt-epoch`, `tt-txcode`, `tt-cron`, `tt-username`) and restored on the next visit. Output is never stored. A stored value naming
@@ -1229,6 +1255,9 @@ npm run build    # runs check first, then the static build
   with.
 - **JSON** — pretty/minify/sort/tab output, seven pinned error offsets (§8.4), that array order
   survives sorting, and that JSON5-isms (trailing commas, unquoted keys, comments) are rejected.
+  For *Open file*: the same accented document as UTF-8, UTF-8 with a BOM, and UTF-16 LE and BE
+  with a BOM all decode to identical text that formats, and a one-byte file is not taken for
+  UTF-16.
 - **YAML** — all three modes, indent and sort options, multi-document streams, error location, and
   two documented behaviours asserted so they cannot drift: comments are dropped by reformatting,
   and unquoted `NO` stays a string under the 1.2 core schema.
@@ -1380,7 +1409,7 @@ Bundle sizes as built (gzip in brackets):
 | CSS | 25.3 KB (5.4 KB) | every page |
 | Theme + prefetch | 2.4 KB (1.1 KB) | every page |
 | Shared DOM helpers | 8.8 KB (3.8 KB) | tool pages |
-| Text-tool wiring | 2.0 KB (0.9 KB) | the four text tools |
+| Text-tool wiring, shared format helpers included | 4.0 KB (1.7 KB) | the text tools |
 | Password page script | 3.2 KB (1.5 KB) | password page |
 | Passphrase page script | 3.0 KB (1.4 KB) | passphrase page |
 | Base64 page script | 1.7 KB (1.0 KB) | Base64 page |

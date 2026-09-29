@@ -1,7 +1,7 @@
 /** Wiring for the IoPanel component: input in, transformed text out. */
 
-import type { FormatResult } from "./format";
-import { attachCopy, downloadText, el } from "./ui";
+import { decodeText, type FormatResult } from "./format";
+import { announce, attachCopy, downloadText, el } from "./ui";
 
 export interface TextIoOptions {
   /** May be async — YAML loads its parser on first use. */
@@ -33,6 +33,12 @@ export interface TextIo {
 }
 
 const DEBOUNCE_MS = 140;
+
+/**
+ * Largest file "Open file" will load. A textarea holding much more than this
+ * makes every keystroke slow, and the transform runs on the whole of it.
+ */
+export const OPEN_FILE_LIMIT = 10 * 1024 * 1024;
 
 /**
  * One textarea with its colour layer. The textarea's own text is transparent
@@ -68,6 +74,74 @@ function layer(textarea: HTMLTextAreaElement, options: TextIoOptions): Layered |
       follow();
     },
   };
+}
+
+function megabytes(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toLocaleString("en-US", { maximumFractionDigits: 1 })} MB`;
+}
+
+/**
+ * The "Open file" button and dropping a file on the input pane, both of which
+ * end in `load`. Only a drag that carries files is intercepted; dragging
+ * selected text into the textarea stays the browser's own.
+ */
+function attachFileOpen(load: (file: File) => void): void {
+  const button = document.getElementById("io-open");
+  const picker = document.getElementById("io-file") as HTMLInputElement | null;
+  if (!button || !picker) return;
+
+  button.addEventListener("click", () => {
+    // Cleared first, so choosing the same file again still fires `change`.
+    picker.value = "";
+    picker.click();
+  });
+  picker.addEventListener("change", () => {
+    const file = picker.files?.[0];
+    if (file) load(file);
+  });
+
+  const pane = el<HTMLElement>("#io-input-pane");
+  const carriesFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") ?? false;
+  // dragenter/dragleave fire for every child crossed, so count to know when
+  // the pointer has really left the pane.
+  let depth = 0;
+
+  pane.addEventListener("dragenter", (event) => {
+    if (!carriesFiles(event)) return;
+    depth += 1;
+    pane.dataset["dropping"] = "";
+  });
+  pane.addEventListener("dragover", (event) => {
+    if (!carriesFiles(event)) return;
+    // Without this the drop never fires and the browser opens the file itself.
+    event.preventDefault();
+    event.dataTransfer!.dropEffect = "copy";
+  });
+  pane.addEventListener("dragleave", (event) => {
+    if (!carriesFiles(event)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) delete pane.dataset["dropping"];
+  });
+  pane.addEventListener("drop", (event) => {
+    if (!carriesFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    delete pane.dataset["dropping"];
+    const file = event.dataTransfer?.files[0];
+    if (file) load(file);
+  });
+
+  // Inviting a drop makes a near miss likely, and a file dropped anywhere else
+  // is opened by the browser in place of the page, taking what was typed with
+  // it. Outside the pane the drop is refused instead.
+  window.addEventListener("dragover", (event) => {
+    if (!carriesFiles(event) || pane.contains(event.target as Node)) return;
+    event.preventDefault();
+    event.dataTransfer!.dropEffect = "none";
+  });
+  window.addEventListener("drop", (event) => {
+    if (carriesFiles(event)) event.preventDefault();
+  });
 }
 
 function describe(text: string): string {
@@ -117,6 +191,7 @@ export function attachTextIo(options: TextIoOptions): TextIo {
 
   const run = (): void => {
     inputMeta.textContent = describe(input.value);
+    delete inputMeta.dataset["error"];
     inputLayer?.paint(input.value);
 
     if (input.value.length === 0) {
@@ -177,6 +252,29 @@ export function attachTextIo(options: TextIoOptions): TextIo {
       run();
     });
   }
+
+  attachFileOpen((file) => {
+    // The input is left as it was when a file is refused, so nothing typed is
+    // lost to a wrong pick. The reason goes beside the button that was pressed:
+    // the error line sits below both panes, out of sight on most screens.
+    const refuse = (message: string) => {
+      inputMeta.textContent = message;
+      inputMeta.dataset["error"] = "";
+      announce(message);
+    };
+    if (file.size > OPEN_FILE_LIMIT) {
+      refuse(`${file.name} is ${megabytes(file.size)}, over the ${megabytes(OPEN_FILE_LIMIT)} limit — not opened.`);
+      return;
+    }
+    file
+      .arrayBuffer()
+      .then((buffer) => {
+        input.value = decodeText(new Uint8Array(buffer));
+        input.scrollTop = 0;
+        run();
+      })
+      .catch(() => refuse(`Could not read ${file.name}.`));
+  });
 
   const sampleButton = document.getElementById("io-sample");
   if (sampleButton && options.sample !== undefined) {

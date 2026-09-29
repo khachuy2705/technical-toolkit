@@ -27,7 +27,7 @@ import {
   sampleTxCode,
   weekdayName,
 } from "../src/lib/txcode";
-import { lineColumn, sortKeysDeep } from "../src/lib/format";
+import { decodeText, lineColumn, sortKeysDeep } from "../src/lib/format";
 import {
   BULK_MAX,
   DEFAULT_USERNAME_OPTIONS,
@@ -428,6 +428,35 @@ export async function runToolChecks(check: Check): Promise<void> {
 
     check("lineColumn is 1-based", (() => { const p = lineColumn("ab\ncd", 3); return p.line === 2 && p.column === 1; })());
     check("sortKeysDeep leaves primitives", sortKeysDeep(5) === 5 && sortKeysDeep(null) === null);
+  }
+
+  console.log("\n-- opening a file --");
+  {
+    // What "Open file" hands the formatter. Every encoding below must come out
+    // as the same text, with no byte-order mark left for JSON.parse to choke on.
+    const text = '{"name":"Khách hàng","tags":["ô","✓"]}';
+    const utf8 = new TextEncoder().encode(text);
+    const utf16 = (littleEndian: boolean) => {
+      const bytes = new Uint8Array(2 + text.length * 2);
+      bytes.set(littleEndian ? [0xff, 0xfe] : [0xfe, 0xff]);
+      const view = new DataView(bytes.buffer);
+      for (let i = 0; i < text.length; i++) view.setUint16(2 + i * 2, text.charCodeAt(i), littleEndian);
+      return bytes;
+    };
+    const CASES: readonly [string, Uint8Array][] = [
+      ["UTF-8", utf8],
+      ["UTF-8 with a BOM", new Uint8Array([0xef, 0xbb, 0xbf, ...utf8])],
+      ["UTF-16 LE with a BOM (PowerShell 5.1)", utf16(true)],
+      ["UTF-16 BE with a BOM", utf16(false)],
+    ];
+    for (const [name, bytes] of CASES) {
+      const decoded = decodeText(bytes);
+      check(`reads ${name}`, decoded === text, JSON.stringify(decoded));
+      const formatted = formatJson(decoded, { indent: 2, minify: true, sortKeys: false });
+      check(`${name} formats`, formatted.ok && formatted.output === text, formatted.ok ? formatted.output : formatted.message);
+    }
+    check("an empty file is empty text", decodeText(new Uint8Array()) === "");
+    check("a one-byte file is not mistaken for UTF-16", decodeText(new Uint8Array([0x31])) === "1");
   }
 
   console.log("\n-- ipv4 --");

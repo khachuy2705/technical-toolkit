@@ -36,6 +36,19 @@ export function sortKeysDeep(value: unknown): unknown {
   return sorted;
 }
 
+/**
+ * Text from a file's bytes. UTF-8 unless a byte-order mark says UTF-16, which
+ * is what Windows PowerShell 5.1 writes with `>` and `Out-File` — read as
+ * UTF-8, such a file is every other character a NUL. The mark itself is
+ * dropped either way, since no parser wants it at the front of the text.
+ */
+export function decodeText(bytes: Uint8Array): string {
+  const [first, second] = bytes;
+  const encoding =
+    first === 0xff && second === 0xfe ? "utf-16le" : first === 0xfe && second === 0xff ? "utf-16be" : "utf-8";
+  return new TextDecoder(encoding).decode(bytes);
+}
+
 /** `indent` as the string JSON.stringify and js-yaml expect. */
 export type Indent = 2 | 4 | "tab";
 

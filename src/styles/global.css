@@ -948,6 +948,11 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+/* A file that was not opened says why here, beside the button. */
+.io__meta[data-error] {
+  color: var(--strength-0);
+}
+
 .io__text {
   width: 100%;
   min-height: var(--io-min-height, 15rem);
@@ -972,6 +977,13 @@ select {
 
 .io__text::placeholder {
   color: var(--text-faint);
+}
+
+/* A file dragged over the input pane lands in the textarea, so that is what
+   lights up. An outline, not a border, so nothing reflows mid-drag. */
+.io__pane[data-dropping] textarea.io__text {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
 }
 
 .io__error {

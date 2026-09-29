@@ -15,7 +15,7 @@ export function all<T extends Element>(selector: string, root: ParentNode = docu
 }
 
 /** Announces transient status to screen readers, which never see the button flash. */
-function announce(message: string): void {
+export function announce(message: string): void {
   let region = document.getElementById("live-region");
   if (!region) {
     region = document.createElement("div");

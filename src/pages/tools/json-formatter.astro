@@ -2,6 +2,7 @@
 import ToolLayout from "../../layouts/ToolLayout.astro";
 import IoPanel from "../../components/IoPanel.astro";
 import { HIGHLIGHT_LIMIT } from "../../lib/jsonhighlight";
+import { OPEN_FILE_LIMIT } from "../../lib/textio";
 ---
 
 <ToolLayout slug="json-formatter">
@@ -47,13 +48,23 @@ import { HIGHLIGHT_LIMIT } from "../../lib/jsonhighlight";
   <IoPanel
     inputLabel="JSON in"
     outputLabel="JSON out"
-    placeholder="Paste JSON here…"
+    placeholder="Paste JSON here, or drop a .json file…"
     swappable
     minHeight="30rem"
     highlight
+    openFile=".json,.txt,application/json,text/plain"
   />
 
   <section class="card prose">
+    <h2>Open a file instead of pasting</h2>
+    <p>
+      <b>Open file</b> loads a file into the input, and so does dropping one on it. The file is read
+      by the page itself &mdash; like pasted text, it never leaves your browser. UTF-8 is assumed,
+      and a UTF-16 file (what Windows PowerShell writes with <code>&gt;</code>) is recognised by its
+      byte-order mark. Files up to {OPEN_FILE_LIMIT / (1024 * 1024)} MB can be opened; beyond that
+      the textarea itself becomes too slow to use.
+    </p>
+
     <h2>Errors name the line</h2>
     <p>
       Engines report a parse failure as a character offset — &ldquo;position 412&rdquo; — which is
