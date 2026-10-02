@@ -1,0 +1,1074 @@
+---
+/**
+ * systemd OnCalendar explainer. Written in English and Vietnamese: every
+ * string on the page is said twice and the switch under the title shows one
+ * (see Say.astro); what the script draws follows `pageLang()`.
+ */
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import Say from "../../components/Say.astro";
+import { ICONS } from "../../data/icons";
+import { bothAttr } from "../../data/i18n";
+import { SHORTHANDS, describeCalendar, parseCalendar } from "../../lib/oncalendar";
+
+const PRESETS = [
+  "Mon..Fri *-*-* 08:30:00",
+  "daily",
+  "*:0/15",
+  "Sat,Sun 10:00",
+  "*-*-01 03:00",
+  "*-*~01 23:00",
+  "Mon *-*-01..07 10:00",
+  "Fri *-*-13",
+  "08..18/2:00",
+  "2026-12-25 09:00 Asia/Ho_Chi_Minh",
+];
+
+const SAMPLE_TIMER = `[Unit]
+Description=Nightly backup
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 02:30:00
+OnCalendar=Sat,Sun 04:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target`;
+
+/** Built from the library, in both languages, so the tables cannot disagree with the tool. */
+const said = (expression: string) => {
+  const spec = parseCalendar(expression);
+  return { expression, normalized: spec.normalized, en: describeCalendar(spec, "en"), vi: describeCalendar(spec, "vi") };
+};
+
+const SHORTHAND_ROWS = [...SHORTHANDS.keys()].map(said);
+
+const EXAMPLES = [
+  "Mon..Fri *-*-* 08:30:00",
+  "*-*-* 02:00:00",
+  "Sat,Sun 10:00",
+  "*:0/15",
+  "Mon..Fri 09..17:00/30",
+  "08..18/2:00",
+  "*-*-01 00:00:00",
+  "*-*~01 23:00",
+  "Mon *-*-01..07 10:00",
+  "Mon *-05~07/1",
+  "Fri *-*-13",
+  "*-01,04,07,10-01 06:00",
+  "*-*-* 06:00:00 UTC",
+  "*:*:0/10",
+].map(said);
+
+const CRON_PRESETS = ["30 8 * * 1-5", "*/15 * * * *", "0 2 * * *", "0 0 13 * 5", "0 */7 * * *"];
+---
+
+<ToolLayout slug="systemd-oncalendar">
+  <section class="card">
+    <div class="controls">
+      <div class="field">
+        <label class="field__label" for="zone"><Say en="Server time zone" vi="Múi giờ máy chủ" /></label>
+        <select id="zone"></select>
+        <p class="field__hint" id="zone-hint"></p>
+      </div>
+      <div class="field">
+        <label class="field__label" for="from"><Say en="Count from" vi="Tính từ thời điểm" /></label>
+        <div class="cal-from">
+          <input type="datetime-local" id="from" class="text-input" step="1" />
+          <button type="button" class="btn btn--tiny" id="from-now"><Say en="Now" vi="Bây giờ" /></button>
+        </div>
+        <p class="field__hint">
+          <Say
+            en="Blank means now. A date here, read in the server's zone, shows how the timer behaves then — around a clock change, say."
+            vi="Để trống là tính từ bây giờ. Chọn một thời điểm, theo múi giờ máy chủ, để xem timer chạy thế nào lúc đó — chẳng hạn quanh lúc đổi giờ."
+          />
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="calendar">
+        <Say en="OnCalendar= — one expression per line, or a whole .timer file" vi="OnCalendar= — mỗi dòng một biểu thức, hoặc cả file .timer" />
+      </label>
+      <span class="io__meta" id="calendar-meta"></span>
+    </div>
+    <textarea
+      id="calendar"
+      class="io__text cal-input"
+      rows="3"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      {...bothAttr("placeholder", "Mon..Fri *-*-* 08:30:00", "Mon..Fri *-*-* 08:30:00")}>Mon..Fri *-*-* 08:30:00</textarea
+    >
+    <div class="preset-row">
+      {PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-preset={preset}>{preset}</button>)}
+      <button type="button" class="btn btn--tiny" id="sample-timer" data-sample={SAMPLE_TIMER}>
+        <Say en="Sample .timer" vi="File .timer mẫu" />
+      </button>
+      <button type="button" class="btn btn--tiny" id="calendar-clear"><Say en="Clear" vi="Xoá" /></button>
+    </div>
+  </section>
+
+  <p class="output__error" id="calendar-error" role="alert" hidden></p>
+  <div class="cron-list" id="calendar-out"></div>
+
+  <section class="card" id="from-cron">
+    <h2 class="card__title"><Say en="Coming from cron?" vi="Chuyển từ cron sang?" /></h2>
+    <div class="io__head">
+      <label class="io__label" for="cron"><Say en="A crontab schedule — five fields" vi="Một lịch crontab — năm trường" /></label>
+    </div>
+    <input
+      type="text"
+      id="cron"
+      class="big-input"
+      value="30 8 * * 1-5"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+    />
+    <div class="preset-row">
+      {CRON_PRESETS.map((preset) => <button type="button" class="btn btn--tiny" data-cron={preset}>{preset}</button>)}
+    </div>
+    <p class="output__error" id="cron-error" role="alert" hidden></p>
+    <div class="cal-convert" id="cron-out"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Shorthands" vi="Cách viết tắt" /></h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          <Say
+            en="The named schedules systemd accepts, what each stands for and when it elapses."
+            vi="Các lịch có tên mà systemd chấp nhận, mỗi tên tương đương với gì và chạy khi nào."
+          />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="Shorthand" vi="Viết tắt" /></th>
+            <th scope="col"><Say en="Stands for" vi="Tương đương" /></th>
+            <th scope="col"><Say en="Elapses" vi="Chạy lúc" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            SHORTHAND_ROWS.map((row) => (
+              <tr data-common={row.expression === "weekly" ? "" : undefined}>
+                <th scope="row" class="sheet__key">{row.expression}</th>
+                <td>{row.normalized}</td>
+                <td class="sheet__prose"><Say en={row.en} vi={row.vi} /></td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      <Say
+        en="systemd also takes annually, anually, biannually, bi-annually and semi-annually, in any case. The highlighted row is the one that surprises people: weekly is Monday, not Sunday."
+        vi="systemd cũng nhận annually, anually, biannually, bi-annually và semi-annually, viết hoa hay thường đều được. Dòng được tô đậm là dòng hay gây bất ngờ: weekly là thứ Hai, không phải Chủ nhật."
+      />
+    </p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Examples" vi="Ví dụ" /></h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          <Say
+            en="Calendar expressions, their normalized form and when each elapses. Every expression has a button that copies it."
+            vi="Các biểu thức lịch, dạng chuẩn hoá và thời điểm chạy. Mỗi biểu thức có nút sao chép."
+          />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="Expression" vi="Biểu thức" /></th>
+            <th scope="col"><Say en="Normalized" vi="Dạng chuẩn hoá" /></th>
+            <th scope="col"><Say en="Elapses" vi="Chạy lúc" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            EXAMPLES.map((row) => (
+              <tr data-common={row.expression === "Fri *-*-13" ? "" : undefined}>
+                <th scope="row" class="sheet__key">
+                  <span class="sheet__mask">
+                    {row.expression}
+                    <button type="button" class="sheet__copy" data-copy-text={row.expression} {...bothAttr("aria-label", `Copy ${row.expression}`, `Sao chép ${row.expression}`)}>
+                      <Icon paths={ICONS.copy} size={12} strokeWidth={1.9} />
+                    </button>
+                  </span>
+                </th>
+                <td>{row.normalized}</td>
+                <td class="sheet__prose"><Say en={row.en} vi={row.vi} /></td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      <Say
+        en="Described by the same code as the tool above. The highlighted row is Friday the 13th — which cron cannot say, and systemd can."
+        vi="Được mô tả bằng chính mã nguồn của công cụ ở trên. Dòng tô đậm là thứ Sáu ngày 13 — điều cron không viết được, còn systemd thì được."
+      />
+    </p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Syntax" vi="Cú pháp" /></h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          <Say en="The parts of a calendar expression, in order." vi="Các phần của một biểu thức lịch, theo thứ tự." />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="Part" vi="Phần" /></th>
+            <th scope="col"><Say en="Written" vi="Cách viết" /></th>
+            <th scope="col"><Say en="Example" vi="Ví dụ" /></th>
+            <th scope="col"><Say en="Means" vi="Nghĩa là" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th scope="row" class="sheet__key"><Say en="Weekdays" vi="Thứ" /></th>
+            <td>Mon … Sun</td>
+            <td>Mon..Fri,Sun</td>
+            <td class="sheet__prose"><Say en="optional; English names, three letters or in full" vi="không bắt buộc; tên tiếng Anh, ba chữ cái hoặc viết đủ" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key"><Say en="Date" vi="Ngày" /></th>
+            <td>YYYY-MM-DD</td>
+            <td>*-*-01</td>
+            <td class="sheet__prose"><Say en="optional; year and month can be left out — 12-25 is every Christmas" vi="không bắt buộc; có thể bỏ năm và tháng — 12-25 là mọi ngày Giáng sinh" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key">~</th>
+            <td>MM~DD</td>
+            <td>*-02~03</td>
+            <td class="sheet__prose"><Say en="the day counted back from the month's end: ~01 is the last day" vi="ngày đếm ngược từ cuối tháng: ~01 là ngày cuối cùng" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key"><Say en="Time" vi="Giờ" /></th>
+            <td>HH:MM[:SS]</td>
+            <td>08:30</td>
+            <td class="sheet__prose"><Say en="optional, 00:00:00 when left out; seconds can have six decimals" vi="không bắt buộc, mặc định 00:00:00; giây có thể có sáu chữ số thập phân" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key"><Say en="Time zone" vi="Múi giờ" /></th>
+            <td>UTC, Area/City</td>
+            <td>Asia/Ho_Chi_Minh</td>
+            <td class="sheet__prose"><Say en="optional; otherwise the server's own zone" vi="không bắt buộc; nếu bỏ thì dùng múi giờ của máy chủ" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key">*</th>
+            <td>*</td>
+            <td>*-*-*</td>
+            <td class="sheet__prose"><Say en="any value" vi="mọi giá trị" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key">,</th>
+            <td>a,b</td>
+            <td>08,20:00</td>
+            <td class="sheet__prose"><Say en="a list" vi="danh sách" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key">..</th>
+            <td>a..b</td>
+            <td>09..17:00</td>
+            <td class="sheet__prose"><Say en="a range, both ends included; it never wraps round" vi="khoảng, tính cả hai đầu; không quay vòng" /></td>
+          </tr>
+          <tr>
+            <th scope="row" class="sheet__key">/</th>
+            <td>a/n, a..b/n</td>
+            <td>*:0/15</td>
+            <td class="sheet__prose"><Say en="every n, starting at a — there is no */n" vi="cứ n một lần, bắt đầu từ a — không có cú pháp */n" /></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose" data-l="en">
+    <h2>A weekday and a date must both match</h2>
+    <p>
+      This is the biggest difference from cron. <code>Fri *-*-13</code> elapses only on a Friday that is
+      also the 13th. Cron joins its two day fields with OR, so <code>0 0 13 * 5</code> runs on every 13th
+      and on every Friday. The converter above writes such a cron line as two <code>OnCalendar=</code>
+      lines, since one calendar event cannot say "either".
+    </p>
+
+    <h2>What the normalized form tells you</h2>
+    <p>
+      systemd rewrites every expression into one shape — weekdays, then <code>year-month-day</code>,
+      then <code>hour:minute:second</code> — and that is what <code>systemd-analyze calendar</code> and
+      <code>systemctl list-timers</code> show. It also tidies on the way: lists are sorted and their
+      duplicates dropped, a range is cut back to the last value its step reaches (<code>08..18/3</code>
+      becomes <code>08..17/3</code>), and two-digit years are filled in. If the normalized form
+      surprises you, the expression does not mean what you thought.
+    </p>
+
+    <h2>Clock changes</h2>
+    <p>
+      A time the clocks skip does not elapse at all that day: a daily <code>02:30</code> timer in New
+      York has no run on the morning the clocks go forward, and nothing catches up. A time that happens
+      twice elapses once, the first time; a timer that runs every few minutes simply goes quiet for the
+      repeated hour. Zones without daylight saving — Asia/Ho_Chi_Minh, UTC — never meet either case.
+    </p>
+
+    <h2>A step with no end, and systemd 259</h2>
+    <p>
+      A step written without an end, such as <code>00/7</code> for every seven hours, runs past the end
+      of its field: after 21:00 it proposes hour 28. systemd 259 normalises that into the next day and
+      then resumes in the wrong place. Crossing into a new month it resumes at 04:00 rather than
+      midnight, so a run is lost; across a clock change it can give up altogether with "Infinite loop in
+      calendar calculation", after which the timer stops until it is restarted. Steps that land exactly
+      on the next hour or day, such as <code>*:0/15</code> or <code>0/6:00</code>, are unaffected. Giving
+      the step its end — <code>00..21/7</code> — means the same times and avoids all of it; the page
+      offers that rewrite whenever it applies, and the list of next runs shows what systemd 259 would
+      actually do.
+    </p>
+
+    <h2>What the list of next runs does not show</h2>
+    <p>
+      A timer elapses within <code>AccuracySec=</code> of the time — one minute unless set otherwise — and
+      <code>RandomizedDelaySec=</code> adds a random delay on top. A timer only runs while the machine is
+      up: with <code>Persistent=true</code>, a run missed while it was off happens once at the next boot.
+      On the server itself, <code>systemd-analyze calendar --iterations=5 'Mon..Fri 08:30'</code> prints
+      what this page prints, and <code>systemctl list-timers</code> shows the next elapse of every timer.
+    </p>
+
+    <h2>What this page reads</h2>
+    <p>
+      The calendar syntax of systemd.time(7), parsed rule for rule as systemd 259 parses it, and checked
+      against <code>systemd-analyze</code> itself. Time zone names must exist on the server, and are
+      case-sensitive there; old names such as Asia/Saigon are missing from some distributions. Everything
+      runs in your browser, and only the time zone is remembered — never an expression.
+    </p>
+  </section>
+
+  <section class="card prose" data-l="vi">
+    <h2>Thứ và ngày phải cùng khớp</h2>
+    <p>
+      Đây là khác biệt lớn nhất so với cron. <code>Fri *-*-13</code> chỉ chạy vào thứ Sáu mà cũng là
+      ngày 13. Cron nối hai trường ngày bằng OR, nên <code>0 0 13 * 5</code> chạy vào mọi ngày 13 và
+      mọi thứ Sáu. Ô chuyển đổi ở trên viết một dòng cron như vậy thành hai dòng <code>OnCalendar=</code>,
+      vì một biểu thức lịch không diễn đạt được "hoặc".
+    </p>
+
+    <h2>Dạng chuẩn hoá cho bạn biết gì</h2>
+    <p>
+      systemd viết lại mọi biểu thức theo một khuôn — thứ, rồi <code>năm-tháng-ngày</code>, rồi
+      <code>giờ:phút:giây</code> — và đó là thứ <code>systemd-analyze calendar</code> và
+      <code>systemctl list-timers</code> hiển thị. Nó cũng sắp xếp lại: danh sách được xếp thứ tự và bỏ
+      mục trùng, khoảng được cắt về giá trị cuối cùng mà bước nhảy chạm tới (<code>08..18/3</code> thành
+      <code>08..17/3</code>), và năm hai chữ số được điền đủ. Nếu dạng chuẩn hoá làm bạn bất ngờ, thì
+      biểu thức không mang nghĩa như bạn nghĩ.
+    </p>
+
+    <h2>Lúc đổi giờ</h2>
+    <p>
+      Giờ bị đồng hồ nhảy qua thì hôm đó không chạy: timer chạy hằng ngày lúc <code>02:30</code> ở New
+      York không chạy vào sáng đồng hồ nhảy tới, và cũng không chạy bù. Giờ diễn ra hai lần thì chạy một
+      lần, ở lượt đầu; timer chạy vài phút một lần sẽ im lặng trong giờ bị lặp lại. Các múi giờ không có
+      giờ mùa hè — Asia/Ho_Chi_Minh, UTC — không bao giờ gặp hai trường hợp này.
+    </p>
+
+    <h2>Bước nhảy không có điểm cuối, và systemd 259</h2>
+    <p>
+      Bước nhảy viết không có điểm cuối, như <code>00/7</code> cho bảy giờ một lần, sẽ vượt quá cuối
+      trường: sau 21:00 nó đề xuất giờ 28. systemd 259 quy đổi giá trị đó sang ngày hôm sau rồi tiếp tục
+      ở sai chỗ. Khi sang tháng mới, nó tiếp tục từ 04:00 thay vì nửa đêm, nên mất một lần chạy; qua lúc
+      đổi giờ, nó có thể bỏ cuộc hẳn với lỗi "Infinite loop in calendar calculation", và timer dừng cho
+      tới khi được khởi động lại. Bước nhảy rơi đúng vào đầu giờ hay đầu ngày kế tiếp, như
+      <code>*:0/15</code> hay <code>0/6:00</code>, thì không sao. Ghi rõ điểm cuối — <code>00..21/7</code> —
+      vẫn là những thời điểm đó và tránh được tất cả; trang này đưa ra cách viết lại đó mỗi khi cần, và
+      danh sách các lần chạy tiếp theo cho thấy systemd 259 thực sự sẽ làm gì.
+    </p>
+
+    <h2>Danh sách các lần chạy không cho thấy gì</h2>
+    <p>
+      Timer chạy trong khoảng <code>AccuracySec=</code> quanh thời điểm đó — một phút nếu không đặt khác —
+      và <code>RandomizedDelaySec=</code> cộng thêm một khoảng trễ ngẫu nhiên. Timer chỉ chạy khi máy đang
+      bật: với <code>Persistent=true</code>, lần chạy bị lỡ lúc máy tắt sẽ được chạy một lần khi khởi động
+      lại. Trên chính máy chủ, <code>systemd-analyze calendar --iterations=5 'Mon..Fri 08:30'</code> in ra
+      đúng những gì trang này hiển thị, còn <code>systemctl list-timers</code> cho biết lần chạy tiếp theo
+      của mọi timer.
+    </p>
+
+    <h2>Trang này đọc những gì</h2>
+    <p>
+      Cú pháp lịch của systemd.time(7), được phân tích đúng từng quy tắc như systemd 259 làm, và được đối
+      chiếu với chính <code>systemd-analyze</code>. Tên múi giờ phải có trên máy chủ và phân biệt chữ hoa
+      chữ thường ở đó; tên cũ như Asia/Saigon không còn trong một số bản phân phối. Mọi thứ chạy trong
+      trình duyệt của bạn, và trang chỉ ghi nhớ múi giờ — không bao giờ ghi nhớ biểu thức.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    CalendarError,
+    boundedForm,
+    calendarNotes,
+    clockChangeNotes,
+    describeCalendar,
+    describeField,
+    formatChain,
+    fromCron,
+    nextElapses,
+    parseCalendar,
+    scheduleZone,
+    stepNotes,
+    type CalendarField,
+    type CalendarSpec,
+    type CalendarWall,
+    type ElapseSearch,
+  } from "../../lib/oncalendar";
+  import { parseSchedule } from "../../lib/cron";
+  import { availableZones, localZone, parseWallTime, relativeToNow, wallTimeToMs, zonedParts } from "../../lib/epoch";
+  import { all, attachCopy, el, loadPrefs, savePrefs } from "../../lib/ui";
+  import { onLangChange, pageLang } from "../../lib/lang";
+  import type { Both, Lang } from "../../data/i18n";
+
+  const PREFS_KEY = "tt-oncalendar";
+  /** One expression gets a longer list than each line of a file. */
+  const SINGLE_RUNS = 10;
+  const MANY_RUNS = 5;
+  const INPUT_LIMIT = 200;
+
+  const zoneSelect = el<HTMLSelectElement>("#zone");
+  const zoneHint = el<HTMLElement>("#zone-hint");
+  const fromInput = el<HTMLInputElement>("#from");
+  const input = el<HTMLTextAreaElement>("#calendar");
+  const meta = el<HTMLElement>("#calendar-meta");
+  const errorLine = el<HTMLElement>("#calendar-error");
+  const out = el<HTMLElement>("#calendar-out");
+  const cronInput = el<HTMLInputElement>("#cron");
+  const cronError = el<HTMLElement>("#cron-error");
+  const cronOut = el<HTMLElement>("#cron-out");
+
+  const say = (text: Both): string => text[pageLang()];
+  const both = (en: string, vi: string): Both => ({ en, vi });
+
+  /* ----------------------------------------------------------------- settings */
+
+  const HOME = localZone();
+  const zones = availableZones();
+  function fillZones(): void {
+    const fragment = document.createDocumentFragment();
+    for (const zone of zones) {
+      const option = document.createElement("option");
+      option.value = zone;
+      option.textContent = zone === HOME ? `${zone} (${pageLang() === "vi" ? "trình duyệt" : "browser"})` : zone;
+      fragment.append(option);
+    }
+    const chosen = zoneSelect.value;
+    zoneSelect.replaceChildren(fragment);
+    zoneSelect.value = chosen || HOME;
+  }
+  fillZones();
+
+  // The zone only. An expression can name a server or a job, so it is never stored.
+  const prefs = loadPrefs(PREFS_KEY, { zone: HOME });
+  if (typeof prefs.zone === "string" && zones.includes(prefs.zone)) zoneSelect.value = prefs.zone;
+  const serverZone = (): string => zoneSelect.value || HOME;
+
+  function paintZoneHint(): void {
+    zoneHint.textContent =
+      serverZone() === HOME
+        ? say(both(
+            "Your browser's zone. A timer reads its schedule in the server's zone unless the expression names one — pick the server's if it differs.",
+            "Múi giờ của trình duyệt. Timer đọc lịch theo múi giờ máy chủ, trừ khi biểu thức ghi rõ múi giờ — hãy chọn múi giờ của máy chủ nếu khác.",
+          ))
+        : say(both(
+            `Runs are listed as a server set to ${serverZone()} would run them.`,
+            `Các lần chạy được liệt kê như trên một máy chủ đặt múi giờ ${serverZone()}.`,
+          ));
+  }
+
+  /** Microseconds to count from: the picked wall time in the server's zone, or now. */
+  function startUs(): number {
+    if (fromInput.value === "") return Date.now() * 1000;
+    try {
+      return wallTimeToMs(parseWallTime(fromInput.value), serverZone()).ms * 1000;
+    } catch {
+      return Date.now() * 1000;
+    }
+  }
+
+  /* ---------------------------------------------------------------- rendering */
+
+  function node<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  }
+
+  function copyButton(getText: () => string, label: Both): HTMLButtonElement {
+    const button = node("button", "btn btn--tiny");
+    button.type = "button";
+    button.setAttribute("aria-label", say(label));
+    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+    button.append(node("span", undefined, say(both("Copy", "Chép"))));
+    button.lastElementChild!.setAttribute("data-label", "");
+    attachCopy(button, getText);
+    return button;
+  }
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const DAYS: Record<Lang, readonly string[]> = {
+    en: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    vi: ["T2", "T3", "T4", "T5", "T6", "T7", "CN"],
+  };
+  const weekday = (w: CalendarWall) => {
+    const days = Math.floor(Date.UTC(w.year, w.month - 1, w.day) / 86_400_000);
+    return DAYS[pageLang()][(((days + 3) % 7) + 7) % 7]!;
+  };
+  const secondsText = (us: number) => {
+    const whole = pad(Math.floor(us / 1_000_000));
+    const fraction = us % 1_000_000;
+    return fraction > 0 ? `${whole}.${String(fraction).padStart(6, "0")}` : whole;
+  };
+  const dateText = (w: CalendarWall) => `${w.year}-${pad(w.month)}-${pad(w.day)}`;
+  const timeText = (w: CalendarWall) => `${pad(w.hour)}:${pad(w.minute)}:${secondsText(w.us)}`;
+  const clockText = (w: CalendarWall) => `${pad(w.hour)}:${pad(w.minute)}`;
+  const wallText = (w: CalendarWall) => `${weekday(w)} ${dateText(w)} ${timeText(w)}`;
+
+  /** Relative-time labels on screen, refreshed in place, and the soonest run, after which everything is redrawn. */
+  let relatives: { node: HTMLElement; ms: number }[] = [];
+  let soonest = Number.POSITIVE_INFINITY;
+
+  const FIELD_ROWS: readonly { field: CalendarField | "weekday"; label: Both }[] = [
+    { field: "weekday", label: both("Weekday", "Thứ") },
+    { field: "year", label: both("Year", "Năm") },
+    { field: "month", label: both("Month", "Tháng") },
+    { field: "day", label: both("Day", "Ngày") },
+    { field: "hour", label: both("Hour", "Giờ") },
+    { field: "minute", label: both("Minute", "Phút") },
+    { field: "second", label: both("Second", "Giây") },
+  ];
+
+  function renderFields(spec: CalendarSpec, zone: string): HTMLElement {
+    const wrap = node("div", "table-wrap cron-fields");
+    const table = node("table", "sheet");
+    table.append(node("caption", "visually-hidden", say(both("Each part of the expression, as systemd stores it and as it expands.", "Từng phần của biểu thức, như systemd lưu và như nó được mở rộng."))));
+    const head = node("thead");
+    const headRow = node("tr");
+    for (const title of [both("Part", "Phần"), both("Normalized", "Chuẩn hoá"), both("Matches", "Khớp với")]) {
+      const th = node("th", undefined, say(title));
+      th.scope = "col";
+      headRow.append(th);
+    }
+    head.append(headRow);
+    const body = node("tbody");
+    const [weekdays, date, time] = splitNormalized(spec);
+    const [year, month, day] = date.split(/[-~]/);
+    const [hour, minute, second] = time.split(":");
+    const written: Record<CalendarField | "weekday", string> = {
+      weekday: weekdays,
+      year: year!,
+      month: month!,
+      day: spec.endOfMonth ? `~${day}` : day!,
+      hour: hour!,
+      minute: minute!,
+      second: second!,
+    };
+    for (const row of FIELD_ROWS) {
+      const tr = node("tr");
+      const th = node("th", "sheet__key", say(row.label));
+      th.scope = "row";
+      tr.append(th, node("td", undefined, written[row.field]), node("td", "sheet__prose", describeField(spec, row.field, pageLang())));
+      body.append(tr);
+    }
+    const zoneRow = node("tr");
+    const zoneHead = node("th", "sheet__key", say(both("Time zone", "Múi giờ")));
+    zoneHead.scope = "row";
+    const zoneWritten = spec.utc ? "UTC" : (spec.zone ?? "—");
+    const zoneSays = spec.utc || spec.zone
+      ? say(both(`${zone}, written in the expression`, `${zone}, ghi trong biểu thức`))
+      : say(both(`the server's zone — ${zone} here`, `múi giờ máy chủ — ở đây là ${zone}`));
+    zoneRow.append(zoneHead, node("td", undefined, zoneWritten), node("td", "sheet__prose", zoneSays));
+    body.append(zoneRow);
+    table.append(head, body);
+    wrap.append(table);
+    return wrap;
+  }
+
+  /** The normalized form's three parts: weekdays (or "*"), date, time. */
+  function splitNormalized(spec: CalendarSpec): [string, string, string] {
+    const words = spec.normalized.split(" ");
+    const weekdays = /^[A-Z][a-z]{2}/.test(words[0]!) ? words.shift()! : "*";
+    return [weekdays, words[0]!, words[1]!];
+  }
+
+  function stepText(item: { start: number; stop: number; repeat: number }, field: CalendarField): string {
+    return formatChain([item], field, false);
+  }
+
+  const UNIT_OF: Record<string, Both> = {
+    month: both("year", "năm"),
+    day: both("month", "tháng"),
+    hour: both("day", "ngày"),
+    minute: both("hour", "giờ"),
+    second: both("minute", "phút"),
+  };
+
+  function renderRuns(spec: CalendarSpec, zone: string, count: number, startAt: number): HTMLElement {
+    const box = node("div", "cron-runs");
+    const title = fromInput.value === "" ? both(`Next runs in ${zone}`, `Các lần chạy tiếp theo theo giờ ${zone}`) : both(`Runs after ${fromInput.value.replace("T", " ")} in ${zone}`, `Các lần chạy sau ${fromInput.value.replace("T", " ")} theo giờ ${zone}`);
+    box.append(node("h3", "cron-runs__title", say(title)));
+
+    let search: ElapseSearch;
+    try {
+      search = nextElapses(spec, zone, startAt, count);
+    } catch {
+      box.append(node("p", "cron-runs__never", say(both("The runs could not be worked out in this browser.", "Trình duyệt này không tính được các lần chạy."))));
+      return box;
+    }
+
+    if (search.never) {
+      box.append(
+        node(
+          "p",
+          "cron-runs__never",
+          say(both(
+            "Never elapses: no time from here to the end of 2199, where systemd's calendar stops, matches this expression.",
+            "Không bao giờ chạy: không có thời điểm nào từ đây đến hết năm 2199, nơi lịch của systemd dừng lại, khớp với biểu thức này.",
+          )),
+        ),
+      );
+      return box;
+    }
+
+    const now = Date.now();
+    const list = node("ol", "cron-runs__list");
+    const missed = [...search.missed];
+    const addMissed = (before: CalendarWall | null) => {
+      while (missed.length > 0 && (before === null || compare(missed[0]!.lost, before) < 0)) {
+        const miss = missed.shift()!;
+        const item = node("li", "cron-runs__item");
+        item.dataset["dst"] = "";
+        item.append(node("span", "cron-runs__when cal-run--lost", wallText(miss.lost)));
+        const unit = UNIT_OF[miss.field]!;
+        const tag =
+          miss.cause === "carry"
+            ? both(
+                `systemd 259 skips this run: ${stepText(miss.item, miss.field)} runs past the end of the ${unit.en}, and it resumes at ${clockText(miss.resume)} instead of ${clockText(miss.lost)}.`,
+                `systemd 259 bỏ qua lần chạy này: ${stepText(miss.item, miss.field)} vượt quá cuối ${unit.vi}, và nó tiếp tục từ ${clockText(miss.resume)} thay vì ${clockText(miss.lost)}.`,
+              )
+            : both(
+                `systemd 259 skips this run: ${stepText(miss.item, miss.field)} runs past the clock change, and it resumes at ${clockText(miss.resume)}.`,
+                `systemd 259 bỏ qua lần chạy này: ${stepText(miss.item, miss.field)} vượt qua lúc đổi giờ, và nó tiếp tục từ ${clockText(miss.resume)}.`,
+              );
+        item.append(node("span", "cron-runs__tag", say(tag)));
+        list.append(item);
+      }
+    };
+
+    for (const run of search.elapses) {
+      addMissed(run.wall);
+      const ms = Math.floor(run.us / 1000);
+      const item = node("li", "cron-runs__item");
+      const offset = zonedParts(ms, zone).offset;
+      const rel = node("span", "cron-runs__rel", relativeToNow(ms, now, pageLang()));
+      relatives.push({ node: rel, ms });
+      soonest = Math.min(soonest, ms);
+      item.append(node("span", "cron-runs__when", wallText(run.wall)), node("span", "cron-runs__offset", offset), rel);
+      if (run.repeated !== null) {
+        item.dataset["dst"] = "";
+        const tag =
+          run.repeated === "first"
+            ? both(
+                `${clockText(run.wall)} happens twice that day — the clocks go back — and systemd runs it once, the first time.`,
+                `${clockText(run.wall)} diễn ra hai lần trong ngày đó — đồng hồ lùi lại — và systemd chỉ chạy một lần, ở lượt đầu.`,
+              )
+            : both(
+                `The second ${clockText(run.wall)} of the day, after the clocks went back: counting started after the first had passed.`,
+                `Lần ${clockText(run.wall)} thứ hai trong ngày, sau khi đồng hồ lùi lại: việc đếm bắt đầu sau khi lượt đầu đã qua.`,
+              );
+        item.append(node("span", "cron-runs__tag", say(tag)));
+      }
+      list.append(item);
+    }
+    addMissed(null);
+    box.append(list);
+
+    for (const skip of search.skipped) {
+      box.append(
+        node(
+          "p",
+          "cron-runs__skip",
+          say(
+            skip.more
+              ? both(
+                  `On ${dateText(skip.wall)} the clocks jump forward to ${clockText(skip.resume)}: every run from ${clockText(skip.wall)} until then does not exist, and systemd skips them.`,
+                  `Ngày ${dateText(skip.wall)} đồng hồ nhảy tới ${clockText(skip.resume)}: mọi lần chạy từ ${clockText(skip.wall)} đến lúc đó không tồn tại, và systemd bỏ qua chúng.`,
+                )
+              : both(
+                  `On ${dateText(skip.wall)} the clocks jump forward to ${clockText(skip.resume)}: ${clockText(skip.wall)} does not exist that day, and systemd skips it — there is no catch-up run.`,
+                  `Ngày ${dateText(skip.wall)} đồng hồ nhảy tới ${clockText(skip.resume)}: hôm đó không có ${clockText(skip.wall)}, và systemd bỏ qua lần chạy này — không chạy bù.`,
+                ),
+          ),
+        ),
+      );
+    }
+
+    if (search.stuck !== null) {
+      const fixed = boundedForm(spec);
+      const after = search.elapses.length > 0 ? wallText(search.elapses[search.elapses.length - 1]!.wall) : null;
+      box.append(
+        node(
+          "p",
+          "cron-runs__never",
+          say(both(
+            `systemd 259 cannot work out the run ${after ? `after ${after}` : "from here"}: the step ${stepText(search.stuck.item, search.stuck.field)} runs into ${dateText(search.stuck.landing)} across a clock change, and systemd gives up with “Infinite loop in calendar calculation”. The timer then stops until it is restarted.${fixed ? ` Written ${fixed}, the same schedule works.` : ""}`,
+            `systemd 259 không tính được lần chạy ${after ? `sau ${after}` : "từ thời điểm này"}: bước nhảy ${stepText(search.stuck.item, search.stuck.field)} vượt sang ${dateText(search.stuck.landing)} qua lúc đổi giờ, và systemd bỏ cuộc với lỗi “Infinite loop in calendar calculation”. Timer khi đó dừng cho tới khi được khởi động lại.${fixed ? ` Viết thành ${fixed} thì cùng lịch đó chạy đúng.` : ""}`,
+          )),
+        ),
+      );
+    }
+    return box;
+  }
+
+  const compare = (a: CalendarWall, b: CalendarWall) =>
+    a.year - b.year || a.month - b.month || a.day - b.day || a.hour - b.hour || a.minute - b.minute || a.us - b.us;
+
+  interface Line {
+    readonly line: number;
+    readonly text: string;
+  }
+
+  function renderSpec(entry: Line, spec: CalendarSpec, heading: boolean, runs: number, startAt: number): HTMLElement {
+    const card = node("article", "cron-job");
+    const zone = scheduleZone(spec, serverZone());
+
+    if (heading) {
+      const head = node("header", "cron-job__head");
+      head.append(node("span", "cron-job__line", say(both(`Line ${entry.line}`, `Dòng ${entry.line}`))), node("code", "cron-job__expr", entry.text));
+      card.append(head);
+    }
+
+    const normal = node("div", "cron-out");
+    const row = node("div", "cron-out__row");
+    row.append(node("span", "cron-out__label", say(both("Normalized", "Chuẩn hoá"))), node("code", "cron-out__expr cal-normal", spec.normalized));
+    row.append(copyButton(() => spec.normalized, both("Copy the normalized form", "Chép dạng chuẩn hoá")));
+    normal.append(row);
+    const fixed = boundedForm(spec);
+    if (fixed !== null) {
+      const fixRow = node("div", "cron-out__row");
+      fixRow.append(node("span", "cron-out__label", say(both("Safer form", "Cách viết an toàn"))), node("code", "cron-out__line", fixed));
+      fixRow.append(copyButton(() => fixed, both("Copy the safer form", "Chép cách viết an toàn")));
+      normal.append(fixRow);
+    }
+    card.append(normal);
+
+    const sentence = node("p", "cron-job__say", describeCalendar(spec, pageLang()));
+    card.append(sentence);
+    card.append(renderFields(spec, zone));
+
+    const notes = [
+      ...calendarNotes(spec),
+      ...stepNotes(spec, zone, startAt / 1000),
+      ...clockChangeNotes(spec, zone, startAt / 1000),
+    ];
+    if (notes.length > 0) {
+      const list = node("ul", "notes cron-job__notes");
+      for (const note of notes) list.append(node("li", "notes__item", say(note)));
+      card.append(list);
+    }
+    card.append(renderRuns(spec, zone, runs, startAt));
+    return card;
+  }
+
+  function renderBad(entry: Line, error: CalendarError, heading: boolean): HTMLElement {
+    const card = node("article", "cron-bad");
+    if (heading) {
+      const head = node("header", "cron-job__head");
+      head.append(node("span", "cron-job__line", say(both(`Line ${entry.line}`, `Dòng ${entry.line}`))), node("code", "cron-job__expr", entry.text));
+      card.append(head);
+    }
+    card.append(node("p", undefined, say(error.text)));
+    if (error.cron) {
+      const use = node("button", "btn btn--tiny", say(both("Convert it below", "Chuyển đổi ở ô bên dưới")));
+      use.type = "button";
+      use.addEventListener("click", () => {
+        cronInput.value = entry.text;
+        runCron();
+        el<HTMLElement>("#from-cron").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      });
+      card.append(use);
+    }
+    return card;
+  }
+
+  /**
+   * The expressions in the input. A whole .timer file gives its OnCalendar=
+   * lines, where an empty one clears those above it, as systemd reads them.
+   */
+  function readLines(text: string): { lines: Line[]; fileLines: number; cleared: boolean } {
+    const raw = text.split(/\r\n|\n|\r/);
+    const isFile = raw.some((line) => /^\s*\[/.test(line) || /^\s*OnCalendar\s*=/i.test(line));
+    const lines: Line[] = [];
+    let cleared = false;
+    raw.forEach((source, index) => {
+      const trimmed = source.trim();
+      if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith(";")) return;
+      if (!isFile) {
+        lines.push({ line: index + 1, text: trimmed });
+        return;
+      }
+      const match = /^OnCalendar\s*=(.*)$/.exec(trimmed);
+      if (!match) return;
+      const value = match[1]!.trim();
+      if (value === "") {
+        lines.length = 0;
+        cleared = true;
+        return;
+      }
+      lines.push({ line: index + 1, text: value });
+    });
+    return { lines, fileLines: isFile ? raw.length : 0, cleared };
+  }
+
+  function run(): void {
+    relatives = [];
+    soonest = Number.POSITIVE_INFINITY;
+    out.replaceChildren();
+    errorLine.hidden = true;
+
+    const text = input.value;
+    if (text.trim() === "") {
+      meta.textContent = "";
+      return;
+    }
+    const { lines, fileLines, cleared } = readLines(text);
+    if (lines.length > INPUT_LIMIT) {
+      errorLine.textContent = say(both(`That is ${lines.length} expressions; the page reads up to ${INPUT_LIMIT} at once.`, `Có ${lines.length} biểu thức; trang đọc tối đa ${INPUT_LIMIT} biểu thức một lần.`));
+      errorLine.hidden = false;
+      meta.textContent = "";
+      return;
+    }
+    if (fileLines > 0 && lines.length === 0) {
+      out.append(node("p", "field__hint", say(cleared
+        ? both("The last OnCalendar= line is empty, which clears the ones above it — this timer has no calendar left.", "Dòng OnCalendar= cuối cùng để trống, nên xoá hết các dòng phía trên — timer này không còn lịch nào.")
+        : both("No OnCalendar= line in this file.", "File này không có dòng OnCalendar= nào."))));
+      meta.textContent = "";
+      return;
+    }
+
+    const parsed = lines.map((entry) => {
+      try {
+        return { entry, spec: parseCalendar(entry.text), error: null };
+      } catch (error) {
+        if (!(error instanceof CalendarError)) throw error;
+        return { entry, spec: null, error };
+      }
+    });
+    const valid = parsed.filter((item) => item.spec !== null);
+    const bad = parsed.length - valid.length;
+    meta.textContent = say(both(
+      `${valid.length} valid${bad > 0 ? `, ${bad} not` : ""}${fileLines > 0 ? " — OnCalendar= lines of a timer file" : ""}`,
+      `${valid.length} hợp lệ${bad > 0 ? `, ${bad} không hợp lệ` : ""}${fileLines > 0 ? " — các dòng OnCalendar= của file timer" : ""}`,
+    ));
+
+    const startAt = startUs();
+    const single = parsed.length === 1;
+    if (valid.length >= 2) out.append(renderMerged(valid.map((item) => ({ entry: item.entry, spec: item.spec! })), startAt));
+    if (cleared) {
+      out.append(node("p", "field__hint", say(both("An empty OnCalendar= line cleared the lines above it; only those below are read.", "Một dòng OnCalendar= để trống đã xoá các dòng phía trên; chỉ các dòng bên dưới được đọc."))));
+    }
+    for (const item of parsed) {
+      out.append(
+        item.spec !== null
+          ? renderSpec(item.entry, item.spec, !single, single ? SINGLE_RUNS : MANY_RUNS, startAt)
+          : renderBad(item.entry, item.error!, !single),
+      );
+    }
+  }
+
+  /** A timer with several OnCalendar= lines elapses at whichever comes first. */
+  function renderMerged(items: { entry: Line; spec: CalendarSpec }[], startAt: number): HTMLElement {
+    const card = node("article", "cron-job");
+    card.append(node("p", "cron-job__say", say(both("Together, as one timer:", "Gộp lại, như một timer:"))));
+    const box = node("div", "cron-runs");
+    box.append(node("h3", "cron-runs__title", say(both(`Next ${SINGLE_RUNS} runs, from every line`, `${SINGLE_RUNS} lần chạy tiếp theo, từ mọi dòng`))));
+    const merged = new Map<number, { wall: CalendarWall; zone: string; lines: number[] }>();
+    for (const { entry, spec } of items) {
+      const zone = scheduleZone(spec, serverZone());
+      for (const run of nextElapses(spec, zone, startAt, SINGLE_RUNS).elapses) {
+        const found = merged.get(run.us);
+        if (found) found.lines.push(entry.line);
+        else merged.set(run.us, { wall: run.wall, zone, lines: [entry.line] });
+      }
+    }
+    const now = Date.now();
+    const list = node("ol", "cron-runs__list");
+    for (const [us, run] of [...merged].sort((a, b) => a[0] - b[0]).slice(0, SINGLE_RUNS)) {
+      const ms = Math.floor(us / 1000);
+      const shown = zonedParts(ms, serverZone());
+      const wall: CalendarWall = { year: shown.year, month: shown.month, day: shown.day, hour: shown.hour, minute: shown.minute, us: shown.second * 1_000_000 + (us % 1_000_000) };
+      const item = node("li", "cron-runs__item");
+      const rel = node("span", "cron-runs__rel", relativeToNow(ms, now, pageLang()));
+      relatives.push({ node: rel, ms });
+      soonest = Math.min(soonest, ms);
+      item.append(
+        node("span", "cron-runs__when", wallText(wall)),
+        node("span", "cron-runs__offset", shown.offset),
+        node("span", "cal-run__lines", say(both(`line ${run.lines.join(", ")}`, `dòng ${run.lines.join(", ")}`))),
+        rel,
+      );
+      list.append(item);
+    }
+    box.append(list);
+    card.append(box);
+    return card;
+  }
+
+  /* --------------------------------------------------------------- from cron */
+
+  function runCron(): void {
+    cronOut.replaceChildren();
+    cronError.hidden = true;
+    const text = cronInput.value.trim();
+    if (text === "") return;
+    let schedule;
+    try {
+      schedule = parseSchedule(text);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      cronError.textContent = pageLang() === "vi" ? `Không đọc được lịch cron này (chi tiết bằng tiếng Anh): ${message}` : message;
+      cronError.hidden = false;
+      return;
+    }
+    if (schedule.kind === "reboot") {
+      cronOut.append(node("p", "field__hint", say(both(
+        "@reboot has no calendar: in a timer, use OnBootSec= instead, or give the service WantedBy=multi-user.target.",
+        "@reboot không có lịch: trong timer, hãy dùng OnBootSec=, hoặc đặt WantedBy=multi-user.target cho service.",
+      ))));
+      return;
+    }
+    const lines = fromCron(schedule);
+    for (const line of lines) {
+      const row = node("div", "cron-out__row");
+      row.append(node("span", "cron-out__label", "OnCalendar="), node("code", "cron-out__line", line));
+      row.append(copyButton(() => `OnCalendar=${line}`, both("Copy the OnCalendar= line", "Chép dòng OnCalendar=")));
+      const explain = node("button", "btn btn--tiny", say(both("Explain", "Giải thích")));
+      explain.type = "button";
+      explain.addEventListener("click", () => {
+        input.value = lines.join("\n");
+        run();
+        input.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+      });
+      row.append(explain);
+      cronOut.append(row);
+    }
+    const notes: Both[] = [];
+    if (lines.length === 2) {
+      notes.push(both(
+        "Cron runs this on a day matching either day field; a calendar event needs both to match, so the timer gets one line for each.",
+        "Cron chạy lịch này vào ngày khớp với một trong hai trường ngày; biểu thức lịch đòi cả hai cùng khớp, nên timer cần mỗi trường một dòng.",
+      ));
+    }
+    notes.push(both(
+      "Around a clock change the two differ: cron runs a fixed-time job at the jump when its time is skipped, systemd skips it that day. Add Persistent=true to the timer if a run missed while the machine was off should still happen.",
+      "Quanh lúc đổi giờ hai bên khác nhau: cron chạy job giờ cố định ngay lúc nhảy giờ nếu giờ đó bị bỏ qua, còn systemd thì bỏ qua lần đó. Thêm Persistent=true vào timer nếu muốn lần chạy bị lỡ lúc máy tắt vẫn được chạy bù.",
+    ));
+    const list = node("ul", "notes cal-convert__notes");
+    for (const note of notes) list.append(node("li", "notes__item", say(note)));
+    cronOut.append(list);
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  let timer: number | undefined;
+  input.addEventListener("input", () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(run, 140);
+  });
+  for (const button of all<HTMLButtonElement>("[data-preset]")) {
+    button.addEventListener("click", () => {
+      input.value = button.dataset["preset"] ?? "";
+      run();
+    });
+  }
+  const sample = el<HTMLButtonElement>("#sample-timer");
+  sample.addEventListener("click", () => {
+    input.value = sample.dataset["sample"] ?? "";
+    run();
+  });
+  el<HTMLButtonElement>("#calendar-clear").addEventListener("click", () => {
+    input.value = "";
+    run();
+    input.focus();
+  });
+
+  zoneSelect.addEventListener("change", () => {
+    savePrefs(PREFS_KEY, { zone: zoneSelect.value });
+    paintZoneHint();
+    run();
+  });
+  fromInput.addEventListener("change", run);
+  el<HTMLButtonElement>("#from-now").addEventListener("click", () => {
+    fromInput.value = "";
+    run();
+  });
+
+  let cronTimer: number | undefined;
+  cronInput.addEventListener("input", () => {
+    window.clearTimeout(cronTimer);
+    cronTimer = window.setTimeout(runCron, 140);
+  });
+  for (const button of all<HTMLButtonElement>("[data-cron]")) {
+    button.addEventListener("click", () => {
+      cronInput.value = button.dataset["cron"] ?? "";
+      runCron();
+    });
+  }
+  for (const button of all<HTMLButtonElement>("[data-copy-text]")) {
+    attachCopy(button, () => button.dataset["copyText"] ?? "");
+  }
+
+  onLangChange(() => {
+    fillZones();
+    paintZoneHint();
+    run();
+    runCron();
+  });
+
+  // Relative times drift while the page sits open; a list only changes once its soonest run has passed.
+  window.setInterval(() => {
+    const now = Date.now();
+    if (fromInput.value === "" && now >= soonest) run();
+    else for (const item of relatives) item.node.textContent = relativeToNow(item.ms, now, pageLang());
+  }, 15_000);
+
+  // The unit file analyzer links here with an expression in the fragment, which never reaches a server.
+  function readFragment(): boolean {
+    const match = /^#expr=(.+)$/.exec(location.hash);
+    if (!match) return false;
+    try {
+      input.value = decodeURIComponent(match[1]!);
+    } catch {
+      return false;
+    }
+    return true;
+  }
+  window.addEventListener("hashchange", () => {
+    if (readFragment()) run();
+  });
+
+  readFragment();
+  paintZoneHint();
+  run();
+  runCron();
+</script>

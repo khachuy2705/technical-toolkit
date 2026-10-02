@@ -2,19 +2,25 @@
 import BaseLayout from "./BaseLayout.astro";
 import ToolCard from "../components/ToolCard.astro";
 import ToolGroupNav from "../components/ToolGroupNav.astro";
+import LangSwitch from "../components/LangSwitch.astro";
+import Say from "../components/Say.astro";
 import { LIVE_TOOLS, toolBySlug, toolText } from "../data/tools";
-import { CHROME, type Lang } from "../data/i18n";
+import { CHROME, langAttr, type PageLang } from "../data/i18n";
 import { SITE } from "../data/site";
 
 interface Props {
   slug: string;
-  lang?: Lang;
+  /** Defaults to both languages for a tool the registry marks bilingual, else English. */
+  lang?: PageLang;
 }
 
-const { slug, lang = "en" } = Astro.props;
+const { slug } = Astro.props;
 const tool = toolBySlug(slug);
-const text = toolText(tool, lang);
-const chrome = CHROME[lang];
+const lang: PageLang = Astro.props.lang ?? (tool.bilingual ? "both" : "en");
+const both = lang === "both";
+const text = toolText(tool, both ? "en" : lang);
+const vi = toolText(tool, "vi");
+const chrome = CHROME[both ? "en" : lang];
 // Same-group tools first: someone on a network tool wants the next network tool.
 const others = LIVE_TOOLS.filter((t) => t.slug !== slug).sort(
   (a, b) => Number(b.group === tool.group) - Number(a.group === tool.group),
@@ -25,7 +31,7 @@ const jsonLd = {
   "@type": "WebApplication",
   name: text.name,
   description: text.description,
-  inLanguage: chrome.htmlLang,
+  inLanguage: both ? ["en", "vi"] : chrome.htmlLang,
   applicationCategory: "SecurityApplication",
   operatingSystem: "Any",
   url: new URL(`/tools/${tool.slug}/`, Astro.site ?? SITE.url).href,
@@ -33,18 +39,37 @@ const jsonLd = {
 };
 ---
 
-<BaseLayout title={text.name} description={text.description} keywords={tool.keywords} lang={lang}>
-  <nav class="breadcrumb" aria-label={chrome.breadcrumb}>
-    <a href="/">{chrome.breadcrumbHome}</a> <span aria-hidden="true">/</span> {text.name}
+<BaseLayout
+  title={text.name}
+  titleVi={both ? vi.name : undefined}
+  description={text.description}
+  keywords={tool.keywords}
+  lang={lang}
+>
+  <nav class="breadcrumb" {...langAttr(lang, "aria-label", CHROME.en.breadcrumb, CHROME.vi.breadcrumb)}>
+    <a href="/">{both ? <Say en={CHROME.en.breadcrumbHome} vi={CHROME.vi.breadcrumbHome} /> : chrome.breadcrumbHome}</a>{" "}
+    <span aria-hidden="true">/</span>{" "}
+    {both ? <Say en={text.name} vi={vi.name} /> : text.name}
   </nav>
 
   <ToolGroupNav slug={slug} lang={lang} />
 
   <div class="tool-head">
-    <h1>{text.name}</h1>
+    {
+      both ? (
+        <div class="tool-head__title">
+          <h1>
+            <Say en={text.name} vi={vi.name} />
+          </h1>
+          <LangSwitch />
+        </div>
+      ) : (
+        <h1>{text.name}</h1>
+      )
+    }
     {/* Anything a page wants directly under its title, such as links to its own sections. */}
     <slot name="head" />
-    <p>{text.description}</p>
+    <p>{both ? <Say en={text.description} vi={vi.description} /> : text.description}</p>
     <span class="privacy-note">
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -61,7 +86,7 @@ const jsonLd = {
         <rect width="18" height="11" x="3" y="11" rx="2"></rect>
         <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
       </svg>
-      {chrome.privacyBadge}
+      {both ? <Say en={CHROME.en.privacyBadge} vi={CHROME.vi.privacyBadge} /> : chrome.privacyBadge}
     </span>
   </div>
 
@@ -72,7 +97,7 @@ const jsonLd = {
   {
     others.length > 0 && (
       <section style="margin-top:3rem">
-        <h2 class="section-label">{chrome.moreTools}</h2>
+        <h2 class="section-label">{both ? <Say en={CHROME.en.moreTools} vi={CHROME.vi.moreTools} /> : chrome.moreTools}</h2>
         <ul class="tool-grid">
           {others.map((other) => (
             <ToolCard tool={other} lang={lang} />

@@ -1,0 +1,22 @@
+---
+/**
+ * Words in both languages, for a page rendered with lang="both". The page's
+ * language switch shows one of the two; see the data-l rules in global.css.
+ *
+ * Plain text goes in `en` and `vi`; markup goes in slots of the same names.
+ * `as` names the element — a span unless a block needs saying twice.
+ */
+interface Props {
+  en?: string;
+  vi?: string;
+  as?: string;
+  class?: string;
+}
+
+const { en, vi, as: Tag = "span", class: className } = Astro.props;
+const markupEn = Astro.slots.has("en");
+const markupVi = Astro.slots.has("vi");
+---
+
+{/* No whitespace between the two: the hidden one would leave a space behind. */}
+<Tag data-l="en" class={className}>{markupEn ? <slot name="en" /> : en}</Tag><Tag data-l="vi" class={className}>{markupVi ? <slot name="vi" /> : vi}</Tag>

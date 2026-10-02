@@ -8,12 +8,17 @@ Live tools: **password generator**, **passphrase generator**, **username generat
 DC hero names), **certificate & CSR generator**,
 **hash generator** (MD5/SHA-256/SHA-512), **Base64 encoder/decoder**, **JSON formatter**,
 **YAML formatter**, **Unicode text spoofer**, **Unicode escape converter** (\u00f4 to ô),
-**epoch converter**, **lunar calendar converter** (âm lịch), **crontab generator & explainer**
-(build a schedule, or paste a crontab and read it in English or Vietnamese, with its next runs),
-**transaction code date decoder** (tra ngày từ mã giao dịch), and a network
-group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**, **CIDR
-splitter** and **IPv6 calculator**. Tools are grouped on the home page — Network, Security, Data
-formats, Date & time, Other.
+**epoch converter**, **lunar calendar converter** (âm lịch), **transaction code date decoder**
+(tra ngày từ mã giao dịch); a system group: **crontab generator & explainer** (build a schedule,
+or paste a crontab and read it in English or Vietnamese, with its next runs), **systemd
+OnCalendar explainer** (a timer's schedule normalized exactly as `systemd-analyze` prints it,
+with its next runs) and **systemd unit file analyzer** (paste a `.service` or `.timer`, or
+`systemctl cat` output with drop-ins, and see every line systemd would ignore or refuse); and a
+network group: **subnet calculator**, **IP range to CIDR**, **CIDR aggregator / supernet**,
+**CIDR splitter**, **IPv6 calculator** and **byte & throughput converter** (GiB and GB, Mbps
+and MB/s, 5 TB over 1 Gbps ≈ 11.1 hours). The two systemd tools and the byte converter are written
+in English and Vietnamese, with a switch. Tools are grouped on the home page — Network, Security,
+Data formats, Date & time, System, Other.
 
 [design.md](design.md) documents the source layout, the layering rule, the full feature catalogue
 and the security decisions. Read it before adding a tool.
@@ -32,8 +37,10 @@ One runtime dependency: `js-yaml`, dynamically imported so only the YAML page do
 other tool is written from scratch, including the whole certificate stack — ASN.1/DER, X.509,
 PKCS#10, PKCS#12 and the Java keystore format. A tool page is a few kilobytes of JavaScript; the
 heavy pieces — wordlists, the YAML parser — are separate chunks fetched only when the feature is
-used. The certificate page is the largest at 16 KB gzipped, still an order of magnitude below the
-libraries it replaces.
+used. The certificate page is 16 KB gzipped, still an order of magnitude below the libraries it
+replaces. The systemd unit file analyzer is the largest page, at about 66 KB gzipped with the
+OnCalendar library it reads timers with — most of it the parsers ported from systemd and every
+message in two languages.
 
 ## Commands
 
@@ -55,6 +62,23 @@ the PKCS#12 with its own password derivation. OpenSSL is optional — those chec
 absent. The OpenSSL commands the certificate page displays are checked by *running* them: the
 script is executed with `sh` and the certificate it produces is compared against the one the page
 builds from the same form.
+
+The systemd tools are held to systemd itself. Where `systemd-analyze` can be run — on Linux, or
+through WSL on Windows with a distribution that has systemd — the suite puts generated calendar
+expressions to `systemd-analyze calendar`, thousands of unit files and drop-ins to
+`systemd-analyze verify` and time spans to `systemd-analyze timespan`, and the pages must agree
+with it line for line. Without systemd those checks are skipped; pinned answers recorded from
+systemd 259 still run.
+
+The unit analyzer's table of directives is generated from systemd's own source. To follow a new
+systemd release:
+
+```bash
+curl -sSLO https://raw.githubusercontent.com/systemd/systemd/v259/src/core/load-fragment-gperf.gperf.in
+npx esbuild scripts/unit-directives.ts --bundle --platform=node --format=esm \
+  --outfile=node_modules/.cache/unit-directives.mjs
+node node_modules/.cache/unit-directives.mjs load-fragment-gperf.gperf.in v259
+```
 
 ## Deploying to Vercel
 
@@ -92,6 +116,13 @@ src/
 │   ├── certgen.ts       One form in, one bundle of files out
 │   ├── openssl.ts       The same form, as a script you could have run instead
 │   ├── epoch.ts         Unix time, civil-date maths, time-zone rendering
+│   ├── cron.ts          Crontab: parse, describe, next runs across clock changes
+│   ├── oncalendar.ts    systemd OnCalendar=, ported from systemd 259's calendarspec.c
+│   ├── unitfile.ts      systemd unit files, ported from conf-parser.c and load-fragment.c
+│   ├── unitdirectives.ts  Generated: every directive systemd 259 knows (scripts/unit-directives.ts)
+│   ├── unitdocs.ts      What the common directives do, in English and Vietnamese
+│   ├── timespan.ts      systemd time spans, parsed and printed exactly
+│   ├── bytes.ts         Sizes and rates as exact fractions, transfer time
 │   ├── lunar.ts         Vietnamese lunar calendar (Hồ Ngọc Đức's algorithm)
 │   ├── txcode.ts        Transaction codes that carry a year and a day of year
 │   ├── base64.ts        UTF-8-safe encode/decode, standard and URL-safe
@@ -104,10 +135,11 @@ src/
 │   ├── format.ts        Shared result type, line/column, deep key sort
 │   ├── ui.ts            DOM helpers used by the tool page scripts
 │   ├── textio.ts        Wiring for the two-pane text tools
+│   ├── lang.ts          The language switch on bilingual pages
 │   └── wordlists/       BIP39, superhero and EFF short (dynamic import);
 │                        Marvel and DC heroes for the username page
 ├── layouts/             BaseLayout (head/SEO/theme) and ToolLayout
-├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel…
+├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel, Say, LangSwitch…
 ├── pages/
 │   ├── index.astro      Grid generated from the registry
 │   ├── tools/*.astro    One file per tool
@@ -134,6 +166,11 @@ Entries with `status: 'planned'` render as a dimmed card and stay out of the sit
 **Randomness.** Every random value comes from `crypto.getRandomValues()`. `randomInt` uses
 rejection sampling rather than `% n`, which would make low values marginally more likely.
 `Math.random()` is never used.
+
+**Two languages on one page.** The systemd tools and the byte converter render every string in
+English and Vietnamese and show one; an inline script picks the language before first paint
+(`?lang=`, the reader's earlier choice, then the browser's), and the switch under the title
+changes it. design.md §5 has the details.
 
 **Entropy is about the generator, not the string.** The figure shown is the size of the space an
 attacker searches assuming they know every setting on the page. Pattern-matching scorers like

@@ -2,7 +2,7 @@
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 import { SITE } from "../data/site";
-import { CHROME, type Lang } from "../data/i18n";
+import { CHROME, type PageLang } from "../data/i18n";
 import "../styles/global.css";
 
 interface Props {
@@ -12,17 +12,25 @@ interface Props {
   suffix?: boolean;
   keywords?: readonly string[];
   /** Language of the page and of the chrome drawn around it. */
-  lang?: Lang;
+  lang?: PageLang;
+  /** The Vietnamese title, for a page in both languages. */
+  titleVi?: string;
 }
 
-const { title, description, suffix = true, keywords = [], lang = "en" } = Astro.props;
+const { title, description, suffix = true, keywords = [], lang = "en", titleVi } = Astro.props;
 
-const fullTitle = suffix ? `${title} — ${SITE.name}` : title;
+const full = (name: string) => (suffix ? `${name} — ${SITE.name}` : name);
+const fullTitle = full(title);
 const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
+const bilingual = lang === "both";
 ---
 
 <!doctype html>
-<html lang={CHROME[lang].htmlLang}>
+<html
+  lang={CHROME[bilingual ? "en" : lang].htmlLang}
+  data-title-en={bilingual ? fullTitle : undefined}
+  data-title-vi={bilingual ? full(titleVi ?? title) : undefined}
+>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -47,6 +55,33 @@ const canonical = new URL(Astro.url.pathname, Astro.site ?? SITE.url).href;
         if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
     </script>
+
+    {
+      /*
+       * A page in both languages picks one before first paint, for the same
+       * reason: ?lang= in the address, then the reader's last choice, then
+       * the browser's language. Without script the page reads in English.
+       */
+      bilingual && (
+        <script is:inline>
+          (function () {
+            var lang = "en";
+            try {
+              var asked = /[?&]lang=(en|vi)(?:&|$)/.exec(location.search);
+              var kept = localStorage.getItem("tt-lang");
+              if (asked) lang = asked[1];
+              else if (kept === "en" || kept === "vi") lang = kept;
+              else if (/^vi\b/i.test(navigator.language || "")) lang = "vi";
+            } catch (e) {}
+            var root = document.documentElement;
+            root.setAttribute("data-lang", lang);
+            root.lang = lang;
+            var title = root.getAttribute("data-title-" + lang);
+            if (title) document.title = title;
+          })();
+        </script>
+      )
+    }
   </head>
 
   <body>

@@ -1,0 +1,705 @@
+---
+/**
+ * systemd unit file analyzer. Written in English and Vietnamese: every string
+ * on the page is said twice and the switch under the title shows one (see
+ * Say.astro); what the script draws follows `pageLang()`.
+ */
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Icon from "../../components/Icon.astro";
+import Say from "../../components/Say.astro";
+import { ICONS } from "../../data/icons";
+import { bothAttr } from "../../data/i18n";
+import { SYSTEMD_VERSION } from "../../lib/unitfile";
+
+const SAMPLES = [
+  {
+    id: "mistakes",
+    en: "A service with mistakes",
+    vi: "Service có lỗi",
+    name: "backup.service",
+    text: `[Unit]
+Description=Nightly backup to /srv/backup
+After=network
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/backup.sh --to /srv/backup > /var/log/backup.log
+ExecStartPost=/bin/sh -c 'echo done at $(date +%Y-%m-%d)'
+Restart=allways
+RestartSec=5 minuts
+User=backup
+Enviroment=TARGET=/srv/backup
+MemoryMax=2GB
+
+[install]
+WantedBy=multi-user.target`,
+  },
+  {
+    id: "timer",
+    en: "A timer and its service",
+    vi: "Timer và service của nó",
+    name: "",
+    text: `# /etc/systemd/system/report.timer
+[Unit]
+Description=Weekly report
+
+[Timer]
+OnCalendar=Mon *-*-* 07:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/report.service
+[Unit]
+Description=Weekly report
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/report --format pdf
+User=reports`,
+  },
+  {
+    id: "dropin",
+    en: "systemctl cat, with a drop-in",
+    vi: "systemctl cat, có drop-in",
+    name: "",
+    text: `# /usr/lib/systemd/system/nginx.service
+[Unit]
+Description=A high performance web server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/run/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -q -g 'daemon on; master_process on;'
+ExecStart=/usr/sbin/nginx -g 'daemon on; master_process on;'
+ExecReload=/usr/sbin/nginx -g 'daemon on; master_process on;' -s reload
+TimeoutStopSec=5
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/nginx.service.d/override.conf
+[Service]
+ExecStart=/usr/sbin/nginx -c /etc/nginx/custom.conf -g 'daemon on; master_process on;'
+LimitNOFILE=65536`,
+  },
+  {
+    id: "clean",
+    en: "A clean service",
+    vi: "Service không lỗi",
+    name: "example-api.service",
+    text: `[Unit]
+Description=Example API
+Documentation=https://example.com/docs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/example-api --port 8080
+Restart=on-failure
+RestartSec=5s
+DynamicUser=yes
+StateDirectory=example-api
+Environment=RUST_LOG=info
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target`,
+  },
+] as const;
+
+const MISTAKES: readonly { written: string; en: string; vi: string; instead: string }[] = [
+  { written: "Restart=allways", en: "ignores the line, so the service never restarts", vi: "bỏ qua dòng này, nên service không bao giờ khởi động lại", instead: "Restart=always" },
+  { written: "[install]", en: "ignores the section, so systemctl enable does nothing", vi: "bỏ qua cả mục, nên systemctl enable không làm gì", instead: "[Install]" },
+  { written: "ExecStart=/bin/date +%F", en: "refuses to load the unit: %F is not a specifier", vi: "từ chối nạp unit: %F không phải specifier", instead: "ExecStart=/bin/date +%%F" },
+  { written: "ExecStart=/bin/date +%Y", en: "runs date with the unit file's directory in place of %Y", vi: "chạy date với thư mục chứa file unit thay cho %Y", instead: "ExecStart=/bin/date +%%Y" },
+  { written: "ExecStart=/opt/app > /var/log/app.log", en: "passes > and the path to the program as arguments — no shell runs it", vi: "truyền > và đường dẫn cho chương trình như tham số — không có shell nào chạy nó", instead: "StandardOutput=append:/var/log/app.log" },
+  { written: "After=network", en: "drops the name: a unit name ends in its type", vi: "bỏ tên này: tên unit phải có phần đuôi chỉ loại", instead: "After=network.target" },
+  { written: "MemoryMax=1GB", en: "ignores the line: sizes end in K, M or G alone", vi: "bỏ qua dòng này: dung lượng chỉ kết thúc bằng K, M hoặc G", instead: "MemoryMax=1G" },
+  { written: "TimeoutStopSec=5Min", en: "ignores the line: M means months", vi: "bỏ qua dòng này: M nghĩa là tháng", instead: "TimeoutStopSec=5min" },
+  { written: "ExecStart=bin/server", en: "refuses to load the unit: relative paths are not allowed", vi: "từ chối nạp unit: không được dùng đường dẫn tương đối", instead: "ExecStart=/opt/app/bin/server" },
+  { written: "ExecStart= in a drop-in, without clearing", en: "refuses to load the service: it now has two", vi: "từ chối nạp service: giờ nó có hai lệnh", instead: "ExecStart= on its own line first" },
+];
+---
+
+<ToolLayout slug="systemd-unit-analyzer">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="unit">
+        <Say en="Unit file — one, several, or systemctl cat output" vi="File unit — một file, nhiều file, hoặc kết quả systemctl cat" />
+      </label>
+      <span class="io__meta" id="unit-meta"></span>
+      <button type="button" class="btn btn--tiny" id="unit-open" {...bothAttr("title", "Load a file into the box — or drop one on it", "Nạp một file vào ô — hoặc thả file vào đó")}>
+        <Icon paths={ICONS.upload} size={13} strokeWidth={1.9} />
+        <Say en="Open file" vi="Mở file" />
+      </button>
+      <input type="file" id="unit-file" accept=".service,.timer,.socket,.mount,.automount,.swap,.path,.slice,.scope,.target,.conf,.txt,text/plain" hidden />
+      <button type="button" class="btn btn--tiny" id="unit-clear"><Say en="Clear" vi="Xoá" /></button>
+    </div>
+    <textarea
+      id="unit"
+      class="io__text unit-input"
+      rows="16"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      {...bothAttr("placeholder", "[Unit]\nDescription=…\n\n[Service]\nExecStart=/usr/local/bin/app", "[Unit]\nDescription=…\n\n[Service]\nExecStart=/usr/local/bin/app")}
+    ></textarea>
+    <div class="unit-options">
+      <div class="field unit-options__name">
+        <label class="field__label" for="unit-name"><Say en="File name" vi="Tên file" /></label>
+        <input
+          type="text"
+          id="unit-name"
+          class="text-input"
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          {...bothAttr("placeholder", "backup.service", "backup.service")}
+        />
+        <p class="field__hint">
+          <Say
+            en="Optional. It sets the unit's type when the paste has no systemctl cat header and no section to tell it by."
+            vi="Không bắt buộc. Tên file cho biết loại unit khi nội dung dán vào không có dòng tiêu đề của systemctl cat và không có mục nào để nhận ra."
+          />
+        </p>
+      </div>
+    </div>
+    <div class="preset-row">
+      {
+        SAMPLES.map((sample) => (
+          <button type="button" class="btn btn--tiny" data-sample={sample.text} data-sample-name={sample.name}>
+            <Say en={sample.en} vi={sample.vi} />
+          </button>
+        ))
+      }
+    </div>
+  </section>
+
+  <p class="output__error" id="unit-error" role="alert" hidden></p>
+  <div class="unit-out" id="unit-out" aria-live="polite"></div>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="The usual mistakes" vi="Những lỗi hay gặp" /></h2>
+    <div class="table-wrap">
+      <table class="sheet unit-mistakes">
+        <caption class="visually-hidden">
+          <Say en="Common unit file mistakes, what systemd does with each, and what to write instead." vi="Các lỗi thường gặp trong file unit, systemd xử lý mỗi lỗi ra sao, và nên viết thế nào." />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="Written" vi="Viết" /></th>
+            <th scope="col"><Say en="systemd" vi="systemd" /></th>
+            <th scope="col"><Say en="Write instead" vi="Nên viết" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            MISTAKES.map((row) => (
+              <tr>
+                <th scope="row" class="sheet__key">{row.written}</th>
+                <td class="sheet__prose"><Say en={row.en} vi={row.vi} /></td>
+                <td>{row.instead}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card prose" data-l="en">
+    <h2>A typo does not break a unit — it removes a setting</h2>
+    <p>
+      systemd reads a unit file line by line, and section and key names are case-sensitive. A section or a
+      key it does not know is ignored with a line in the log, and so is a value it cannot read: the unit
+      still starts, without that setting. <code>Restart=allways</code> gives a service that never restarts,
+      <code>[install]</code> gives one that <code>systemctl enable</code> cannot enable, and nothing fails
+      loudly. This page names each of those lines, says what systemd does with it, and offers the line to
+      write instead.
+    </p>
+
+    <h2>Ignored, or refused</h2>
+    <p>
+      A few mistakes stop the unit from loading at all: a relative <code>ExecStart=</code> path, a percent
+      sign that is not a specifier in a command line, a <code>User=</code> that is not a user name, a
+      relative <code>WorkingDirectory=</code>. systemd stops reading the file at that line. Others only show
+      once the whole unit is read: a service that is not <code>Type=oneshot</code> may have one
+      <code>ExecStart=</code>, a <code>Type=dbus</code> service needs <code>BusName=</code>, and a timer needs
+      at least one trigger. Each finding says which kind it is, and whether systemd logs it or this page
+      adds it as advice.
+    </p>
+
+    <h2>Percent signs, and no shell</h2>
+    <p>
+      In a unit file <code>%</code> starts a specifier: <code>%i</code> is the instance, <code>%h</code> the
+      home directory, <code>%Y</code> the unit file's directory. <code>date +%Y-%m-%d</code> therefore runs
+      with a directory, a machine ID and a credentials path in place of the date; write
+      <code>%%</code> for a literal percent sign. And no shell runs the command: <code>&gt;</code>,
+      <code>|</code>, <code>&amp;&amp;</code> and <code>$(…)</code> reach the program as plain arguments.
+      Wrap the command in <code>/bin/sh -c '…'</code>, or send output with <code>StandardOutput=</code>.
+    </p>
+
+    <h2>Drop-ins</h2>
+    <p>
+      <code>systemctl edit</code> writes a drop-in that adds to the unit rather than replacing it. Lists add
+      up, so a drop-in that sets a new <code>ExecStart=</code> gives the service two, and systemd refuses
+      it — clear the old one first with an empty <code>ExecStart=</code> line. A mistake that stops a
+      drop-in only stops that drop-in, but one in the unit file itself means its drop-ins are never read.
+      Paste the output of <code>systemctl cat</code>, with its <code># /path</code> lines, and the page
+      reads each file in place.
+    </p>
+
+    <h2>Timers</h2>
+    <p>
+      A timer is enabled, not its service: give the timer <code>[Install]</code> with
+      <code>WantedBy=timers.target</code>, and leave the service without one. <code>Persistent=true</code>
+      catches up a run missed while the machine was off. The <a href="/tools/systemd-oncalendar/">OnCalendar
+      explainer</a> reads the schedule itself and lists the next runs.
+    </p>
+
+    <h2>What this page reads</h2>
+    <p>
+      The {SYSTEMD_VERSION} settings systemd knows come from systemd's own table, and each value is read by
+      a port of the parser systemd uses for it. Thousands of lines, whole files and drop-ins were put to
+      <code>systemd-analyze verify</code> and to this page, and they agree on every line systemd complains
+      about and on whether the unit loads. What the page cannot know is your server: whether the programs,
+      users and other units exist. Run <code>systemd-analyze verify</code> there for that. Everything here
+      runs in your browser, and nothing you paste is stored or sent.
+    </p>
+  </section>
+
+  <section class="card prose" data-l="vi">
+    <h2>Gõ sai không làm hỏng unit — nó làm mất một thiết lập</h2>
+    <p>
+      systemd đọc file unit từng dòng, và tên mục, tên khoá đều phân biệt chữ hoa chữ thường. Mục hay khoá
+      nó không biết sẽ bị bỏ qua kèm một dòng trong log, giá trị nó không đọc được cũng vậy: unit vẫn khởi
+      động, chỉ là thiếu thiết lập đó. <code>Restart=allways</code> cho ra một service không bao giờ khởi
+      động lại, <code>[install]</code> cho ra một service mà <code>systemctl enable</code> không enable được,
+      và chẳng có lỗi nào hiện lên rõ ràng. Trang này chỉ ra từng dòng như thế, nói systemd làm gì với nó, và
+      gợi ý dòng nên viết thay.
+    </p>
+
+    <h2>Bị bỏ qua, hay bị từ chối</h2>
+    <p>
+      Một số lỗi khiến unit không nạp được: đường dẫn <code>ExecStart=</code> tương đối, dấu phần trăm không
+      phải specifier trong dòng lệnh, <code>User=</code> không phải tên người dùng, <code>WorkingDirectory=</code>
+      tương đối. systemd ngừng đọc file ở dòng đó. Một số lỗi khác chỉ lộ ra khi đọc xong cả unit: service
+      không phải <code>Type=oneshot</code> chỉ được có một <code>ExecStart=</code>, service
+      <code>Type=dbus</code> cần <code>BusName=</code>, và timer cần ít nhất một mốc kích hoạt. Mỗi kết quả
+      cho biết nó thuộc loại nào, và đó là điều systemd ghi vào log hay lời khuyên của trang này.
+    </p>
+
+    <h2>Dấu phần trăm, và không có shell</h2>
+    <p>
+      Trong file unit, <code>%</code> mở đầu một specifier: <code>%i</code> là instance, <code>%h</code> là thư
+      mục nhà, <code>%Y</code> là thư mục chứa file unit. Vì vậy <code>date +%Y-%m-%d</code> chạy với một thư
+      mục, một machine ID và một đường dẫn credentials thay cho ngày tháng; muốn dấu phần trăm thật thì viết
+      <code>%%</code>. Và không có shell nào chạy lệnh: <code>&gt;</code>, <code>|</code>, <code>&amp;&amp;</code>
+      và <code>$(…)</code> đến tay chương trình như tham số thường. Hãy bọc lệnh trong
+      <code>/bin/sh -c '…'</code>, hoặc chuyển đầu ra bằng <code>StandardOutput=</code>.
+    </p>
+
+    <h2>Drop-in</h2>
+    <p>
+      <code>systemctl edit</code> tạo một drop-in bổ sung cho unit chứ không thay thế nó. Danh sách được cộng
+      dồn, nên drop-in đặt một <code>ExecStart=</code> mới sẽ khiến service có hai lệnh, và systemd từ chối —
+      hãy xoá lệnh cũ trước bằng một dòng <code>ExecStart=</code> để trống. Lỗi làm dừng một drop-in chỉ dừng
+      drop-in đó, nhưng lỗi trong chính file unit thì các drop-in của nó không bao giờ được đọc. Hãy dán kết
+      quả của <code>systemctl cat</code>, kèm các dòng <code># /đường-dẫn</code>, và trang sẽ đọc từng file đúng
+      chỗ của nó.
+    </p>
+
+    <h2>Timer</h2>
+    <p>
+      Thứ cần enable là timer, không phải service: hãy cho timer mục <code>[Install]</code> với
+      <code>WantedBy=timers.target</code>, và để service không có mục đó. <code>Persistent=true</code> chạy bù
+      lần chạy bị lỡ lúc máy tắt. <a href="/tools/systemd-oncalendar/">Công cụ giải thích OnCalendar</a> đọc
+      chính lịch chạy và liệt kê các lần chạy tiếp theo.
+    </p>
+
+    <h2>Trang này đọc những gì</h2>
+    <p>
+      Các thiết lập mà systemd {SYSTEMD_VERSION} biết được lấy từ chính bảng của systemd, và mỗi giá trị được
+      đọc bằng bản chuyển thể của đúng bộ phân tích systemd dùng cho nó. Hàng nghìn dòng, file hoàn chỉnh và
+      drop-in đã được đưa cho cả <code>systemd-analyze verify</code> lẫn trang này, và hai bên khớp nhau ở mọi
+      dòng systemd phàn nàn cũng như ở việc unit có nạp được hay không. Điều trang không thể biết là máy chủ
+      của bạn: chương trình, người dùng và các unit khác có tồn tại hay không. Hãy chạy
+      <code>systemd-analyze verify</code> trên máy chủ để kiểm tra điều đó. Mọi thứ ở đây chạy trong trình
+      duyệt của bạn, và không gì bạn dán vào bị lưu lại hay gửi đi.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    UNIT_LINE_LIMIT,
+    analyzeUnits,
+    directiveDoc,
+    manualUrl,
+    type Finding,
+    type UnitAnalysis,
+    type UnitEntry,
+    type UnitSummary,
+  } from "../../lib/unitfile";
+  import { decodeText } from "../../lib/format";
+  import { OPEN_FILE_LIMIT } from "../../lib/textio";
+  import { all, announce, attachCopy, el } from "../../lib/ui";
+  import { onLangChange, pageLang } from "../../lib/lang";
+  import type { Both } from "../../data/i18n";
+
+  const input = el<HTMLTextAreaElement>("#unit");
+  const nameInput = el<HTMLInputElement>("#unit-name");
+  const meta = el<HTMLElement>("#unit-meta");
+  const errorLine = el<HTMLElement>("#unit-error");
+  const out = el<HTMLElement>("#unit-out");
+  const fileInput = el<HTMLInputElement>("#unit-file");
+
+  const say = (text: Both): string => text[pageLang()];
+  const both = (en: string, vi: string): Both => ({ en, vi });
+
+  function node<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  }
+
+  function copyButton(getText: () => string, label: Both): HTMLButtonElement {
+    const button = node("button", "btn btn--tiny");
+    button.type = "button";
+    button.setAttribute("aria-label", say(label));
+    button.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`;
+    const text = node("span", undefined, say(both("Copy", "Chép")));
+    text.setAttribute("data-label", "");
+    button.append(text);
+    attachCopy(button, getText);
+    return button;
+  }
+
+  /** Selects a line of the input, so a finding can be found in the text. */
+  function selectLine(line: number): void {
+    const lines = input.value.split("\n");
+    const start = lines.slice(0, line - 1).reduce((sum, text) => sum + text.length + 1, 0);
+    const end = start + (lines[line - 1]?.length ?? 0);
+    input.focus();
+    input.setSelectionRange(start, end);
+    const height = input.scrollHeight / Math.max(lines.length, 1);
+    input.scrollTop = Math.max(0, (line - 4) * height);
+  }
+
+  const SEVERITY: Record<Finding["severity"], Both> = {
+    error: both("Error", "Lỗi"),
+    warning: both("Warning", "Cảnh báo"),
+    note: both("Note", "Ghi chú"),
+  };
+  const SOURCE: Record<Finding["source"], Both> = {
+    line: both("systemd logs this", "systemd ghi vào log"),
+    unit: both("systemd, about the unit", "systemd, về cả unit"),
+    advice: both("advice", "lời khuyên"),
+  };
+  const TYPE_NAME: Record<string, Both> = {
+    service: both("service", "service"),
+    timer: both("timer", "timer"),
+    socket: both("socket", "socket"),
+    target: both("target", "target"),
+    mount: both("mount", "mount"),
+    automount: both("automount", "automount"),
+    swap: both("swap", "swap"),
+    path: both("path unit", "path unit"),
+    slice: both("slice", "slice"),
+    scope: both("scope", "scope"),
+    device: both("device", "device"),
+  };
+
+  function unitTitle(unit: UnitSummary): string {
+    if (unit.name) return unit.name;
+    const type = unit.type ? say(TYPE_NAME[unit.type]!) : say(both("unit", "unit"));
+    return say(both(`a ${type} without a name`, `${type} chưa có tên`));
+  }
+
+  /** The verdict for one unit, the way systemd would see it. */
+  function verdict(unit: UnitSummary, findings: readonly Finding[]): { text: Both; tone: "refused" | "warn" | "ok" } {
+    const lines = new Set(unit.files.flatMap((file) => file.entries.filter((entry) => entry.ignored).map((entry) => entry.line)));
+    const sections = unit.files.flatMap((file) => file.sections.filter((section) => !section.known));
+    if (unit.refused) {
+      return { tone: "refused", text: both("systemd would refuse to load it — it will not start until the errors below are fixed.", "systemd sẽ từ chối nạp unit này — nó sẽ không chạy cho tới khi các lỗi bên dưới được sửa.") };
+    }
+    const ignored = lines.size + sections.length;
+    if (ignored > 0) {
+      return {
+        tone: "warn",
+        text: both(
+          `systemd loads it, but ignores ${ignored === 1 ? "one line" : `${ignored} lines`}${sections.length > 0 ? " and everything under the sections it does not know" : ""} — the settings there have no effect.`,
+          `systemd nạp được, nhưng bỏ qua ${ignored} dòng${sections.length > 0 ? " và mọi thứ dưới các mục nó không biết" : ""} — các thiết lập ở đó không có tác dụng.`,
+        ),
+      };
+    }
+    return findings.some((f) => f.severity !== "note")
+      ? { tone: "warn", text: both("systemd reads every line of it — but see the advice below.", "systemd đọc được mọi dòng — nhưng hãy xem lời khuyên bên dưới.") }
+      : { tone: "ok", text: both("systemd reads every line of it.", "systemd đọc được mọi dòng của unit này.") };
+  }
+
+  function renderSummary(analysis: UnitAnalysis): HTMLElement {
+    const card = node("section", "card unit-summary");
+    const counts = node("p", "unit-counts");
+    const { error, warning, note } = analysis.counts;
+    const parts: [number, Both, string][] = [
+      [error, both(error === 1 ? "error" : "errors", "lỗi"), "error"],
+      [warning, both(warning === 1 ? "warning" : "warnings", "cảnh báo"), "warning"],
+      [note, both(note === 1 ? "note" : "notes", "ghi chú"), "note"],
+    ];
+    for (const [count, label, tone] of parts) {
+      const chip = node("span", `unit-count unit-count--${tone}`);
+      chip.append(node("b", undefined, String(count)), document.createTextNode(` ${say(label)}`));
+      counts.append(chip);
+    }
+    card.append(counts);
+    const list = node("ul", "unit-verdicts");
+    for (const unit of analysis.units) {
+      const own = analysis.findings.filter((f) => f.line === null ? analysis.units.length === 1 : unit.files.some((file) => f.line! >= file.firstLine - 1 && f.line! <= file.lastLine));
+      const { text, tone } = verdict(unit, own);
+      const item = node("li", `unit-verdict unit-verdict--${tone}`);
+      item.append(node("b", "unit-verdict__name", unitTitle(unit)), node("span", undefined, say(text)));
+      list.append(item);
+    }
+    card.append(list);
+    return card;
+  }
+
+  function lineText(line: number): string {
+    return input.value.split("\n")[line - 1]?.trim() ?? "";
+  }
+
+  function renderFinding(finding: Finding): HTMLElement {
+    const item = node("li", `unit-finding unit-finding--${finding.severity}`);
+    const head = node("div", "unit-finding__head");
+    head.append(node("span", `unit-tag unit-tag--${finding.severity}`, say(SEVERITY[finding.severity])));
+    head.append(node("span", `unit-tag unit-tag--source`, say(SOURCE[finding.source])));
+    if (finding.line !== null) {
+      const jump = node("button", "unit-finding__line", say(both(`Line ${finding.line}`, `Dòng ${finding.line}`)));
+      jump.type = "button";
+      jump.addEventListener("click", () => selectLine(finding.line!));
+      head.append(jump);
+      const source = lineText(finding.line);
+      if (source !== "") head.append(node("code", "unit-finding__code", source));
+    }
+    item.append(head, node("p", "unit-finding__text", say(finding.text)));
+
+    const extras = node("div", "unit-finding__extras");
+    if (finding.fix !== undefined) {
+      const fix = finding.fix;
+      const row = node("div", "unit-fix");
+      row.append(node("span", "unit-fix__label", say(both("Write", "Nên viết"))), node("code", "unit-fix__code", fix));
+      row.append(copyButton(() => fix, both("Copy the suggested line", "Chép dòng gợi ý")));
+      extras.append(row);
+    }
+    const calendar = finding.line !== null ? /^OnCalendar\s*=\s*(.+)$/.exec(lineText(finding.line)) : null;
+    if (calendar) {
+      const link = node("a", "unit-finding__link", say(both("Explain this schedule →", "Giải thích lịch này →")));
+      // The expression rides in the fragment, which the browser never sends to a server.
+      link.href = `/tools/systemd-oncalendar/#expr=${encodeURIComponent(calendar[1]!.trim())}`;
+      extras.append(link);
+    }
+    if (extras.childElementCount > 0) item.append(extras);
+    return item;
+  }
+
+  function renderFindings(analysis: UnitAnalysis): HTMLElement {
+    const card = node("section", "card");
+    card.append(node("h2", "card__title", say(both("What systemd will make of it", "systemd sẽ hiểu file này ra sao"))));
+    if (analysis.findings.length === 0) {
+      card.append(node("p", "field__hint", say(both("Nothing to report: systemd reads every line as written.", "Không có gì cần báo: systemd đọc mọi dòng đúng như đã viết."))));
+      return card;
+    }
+    const list = node("ol", "unit-findings");
+    for (const finding of analysis.findings) list.append(renderFinding(finding));
+    card.append(list);
+    return card;
+  }
+
+  function settingRow(entry: UnitEntry): HTMLTableRowElement {
+    const tr = node("tr");
+    if (entry.ignored || entry.fatal) tr.dataset["ignored"] = "";
+    const line = node("td", "sheet__num");
+    const jump = node("button", "unit-finding__line", String(entry.line));
+    jump.type = "button";
+    jump.setAttribute("aria-label", say(both(`Go to line ${entry.line}`, `Đến dòng ${entry.line}`)));
+    jump.addEventListener("click", () => selectLine(entry.line));
+    line.append(jump);
+    const setting = node("td", "unit-setting");
+    setting.append(node("code", undefined, `${entry.key}=${entry.value}`));
+    const what = node("td", "sheet__prose");
+    if (entry.info !== null) {
+      const doc = directiveDoc(entry.info);
+      if (entry.ignored || entry.fatal) what.append(node("span", "unit-setting__ignored", say(both("Ignored by systemd. ", "systemd bỏ qua. "))));
+      if (doc) what.append(document.createTextNode(`${say(doc)} `));
+      const link = node("a", "unit-setting__man", say(both("manual", "tài liệu")));
+      link.href = manualUrl(entry.info);
+      link.rel = "noopener";
+      link.target = "_blank";
+      what.append(link);
+      if (entry.key === "OnCalendar" && entry.value !== "" && !entry.ignored) {
+        const explain = node("a", "unit-setting__man", say(both("explain the schedule", "giải thích lịch")));
+        // The expression rides in the fragment, which the browser never sends to a server.
+        explain.href = `/tools/systemd-oncalendar/#expr=${encodeURIComponent(entry.value)}`;
+        what.append(document.createTextNode(" · "), explain);
+      }
+    } else {
+      what.append(node("span", "unit-setting__ignored", say(both("Not a setting systemd knows here — ignored.", "systemd không biết thiết lập này ở đây — bị bỏ qua."))));
+    }
+    tr.append(line, setting, what);
+    return tr;
+  }
+
+  function renderUnit(unit: UnitSummary): HTMLElement {
+    const card = node("section", "card unit-card");
+    const title = node("h2", "card__title");
+    title.append(document.createTextNode(unitTitle(unit)));
+    if (unit.type) title.append(node("span", "unit-card__type", ` — ${say(TYPE_NAME[unit.type]!)}`));
+    card.append(title);
+    const files = unit.files.filter((file) => file.path !== null);
+    if (files.length > 0) {
+      const list = node("ul", "unit-card__files");
+      for (const file of files) list.append(node("li", undefined, `${file.path}${file.dropIn ? say(both(" (drop-in)", " (drop-in)")) : ""}`));
+      card.append(list);
+    }
+
+    if (unit.facts.length > 0) {
+      const wrap = node("div", "table-wrap");
+      const table = node("table", "sheet unit-facts");
+      table.append(node("caption", "visually-hidden", say(both("What the unit does, as systemd reads it.", "Unit này làm gì, theo cách systemd đọc."))));
+      const body = node("tbody");
+      for (const fact of unit.facts) {
+        const tr = node("tr");
+        const th = node("th", "sheet__key", say(fact.label));
+        th.scope = "row";
+        tr.append(th, node("td", "sheet__prose", say(fact.value)));
+        body.append(tr);
+      }
+      table.append(body);
+      wrap.append(table);
+      card.append(wrap);
+    }
+
+    const entries = unit.files.flatMap((file) => file.entries);
+    if (entries.length > 0) {
+      const details = node("details", "unit-settings");
+      if (entries.length <= 24) details.open = true;
+      details.append(node("summary", undefined, say(both(`Every setting, line by line (${entries.length})`, `Từng thiết lập, theo từng dòng (${entries.length})`))));
+      const wrap = node("div", "table-wrap");
+      const table = node("table", "sheet");
+      table.append(node("caption", "visually-hidden", say(both("Each setting, what it does, and a link to its manual entry.", "Từng thiết lập, tác dụng của nó, và liên kết tới tài liệu."))));
+      const head = node("thead");
+      const headRow = node("tr");
+      for (const label of [both("Line", "Dòng"), both("Setting", "Thiết lập"), both("What it does", "Tác dụng")]) {
+        const th = node("th", undefined, say(label));
+        th.scope = "col";
+        headRow.append(th);
+      }
+      head.append(headRow);
+      const body = node("tbody");
+      for (const entry of entries) body.append(settingRow(entry));
+      table.append(head, body);
+      wrap.append(table);
+      details.append(wrap);
+      card.append(details);
+    }
+    return card;
+  }
+
+  function run(): void {
+    out.replaceChildren();
+    errorLine.hidden = true;
+    const text = input.value;
+    if (text.trim() === "") {
+      meta.textContent = "";
+      return;
+    }
+    let analysis: UnitAnalysis;
+    try {
+      analysis = analyzeUnits(text, nameInput.value.trim() || null);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+      meta.textContent = "";
+      errorLine.textContent = say(both(`That is ${error.message} lines; the page reads unit files of up to ${UNIT_LINE_LIMIT}.`, `Có ${error.message} dòng; trang đọc file unit dài tối đa ${UNIT_LINE_LIMIT} dòng.`));
+      errorLine.hidden = false;
+      return;
+    }
+    const files = analysis.files.length;
+    meta.textContent = say(both(
+      `${files} ${files === 1 ? "file" : "files"}, ${analysis.units.length} ${analysis.units.length === 1 ? "unit" : "units"}`,
+      `${files} file, ${analysis.units.length} unit`,
+    ));
+    out.append(renderSummary(analysis), renderFindings(analysis));
+    for (const unit of analysis.units) out.append(renderUnit(unit));
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  function loadSample(button: HTMLButtonElement): void {
+    input.value = button.dataset["sample"] ?? "";
+    nameInput.value = button.dataset["sampleName"] ?? "";
+    run();
+  }
+
+  async function openFile(file: File): Promise<void> {
+    if (file.size > OPEN_FILE_LIMIT) {
+      errorLine.textContent = say(both("That file is too large to be a unit file.", "File đó quá lớn để là một file unit."));
+      errorLine.hidden = false;
+      return;
+    }
+    input.value = decodeText(new Uint8Array(await file.arrayBuffer()));
+    if (/\.(?:service|timer|socket|mount|automount|swap|path|slice|scope|target)$/.test(file.name)) nameInput.value = file.name;
+    run();
+    announce(say(both(`Opened ${file.name}.`, `Đã mở ${file.name}.`)));
+  }
+
+  let timer: number | undefined;
+  const later = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(run, 160);
+  };
+  input.addEventListener("input", later);
+  nameInput.addEventListener("input", later);
+  for (const button of all<HTMLButtonElement>("[data-sample]")) {
+    button.addEventListener("click", () => loadSample(button));
+  }
+  el<HTMLButtonElement>("#unit-clear").addEventListener("click", () => {
+    input.value = "";
+    nameInput.value = "";
+    run();
+    input.focus();
+  });
+  el<HTMLButtonElement>("#unit-open").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    if (file) void openFile(file);
+    fileInput.value = "";
+  });
+  input.addEventListener("dragover", (event) => {
+    if (event.dataTransfer?.types.includes("Files")) event.preventDefault();
+  });
+  input.addEventListener("drop", (event) => {
+    const file = event.dataTransfer?.files[0];
+    if (!file) return;
+    event.preventDefault();
+    void openFile(file);
+  });
+
+  onLangChange(run);
+  loadSample(all<HTMLButtonElement>("[data-sample]")[0]!);
+</script>

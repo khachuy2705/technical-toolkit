@@ -44,7 +44,9 @@ function copyWords(): { copied: string; failed: string; announced: string } {
  */
 export function attachCopy(button: HTMLButtonElement, getText: () => string): void {
   const labelEl = button.querySelector<HTMLElement>("[data-label]");
-  const original = labelEl?.textContent ?? "";
+  // Kept as nodes, not text: on a bilingual page the label is a word in each
+  // language, and both have to come back after the flash.
+  const original = labelEl ? [...labelEl.childNodes] : [];
   let timer: number | undefined;
 
   button.addEventListener("click", async () => {
@@ -61,7 +63,7 @@ export function attachCopy(button: HTMLButtonElement, getText: () => string): vo
 
     timer = window.setTimeout(() => {
       delete button.dataset["copied"];
-      if (labelEl) labelEl.textContent = original;
+      if (labelEl) labelEl.replaceChildren(...original);
     }, COPY_FEEDBACK_MS);
   });
 }

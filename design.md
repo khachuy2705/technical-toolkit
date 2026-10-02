@@ -78,6 +78,16 @@ src/
 │   ├── lunar.ts           Vietnamese lunar calendar, Can Chi
 │   ├── txcode.ts          Transaction codes: year + day of year → a date
 │   ├── cron.ts            Crontab: parse, describe (EN/VI), next runs across DST, builder
+│   ├── oncalendar.ts      systemd OnCalendar=: parse and normalize as systemd 259 does,
+│   │                      describe (EN/VI), next elapses with systemd's own mistakes
+│   ├── timespan.ts        systemd time spans (5min, 1h 30min), parsed and printed exactly
+│   ├── unitfile.ts        systemd unit files: conf-parser, every value parser, the
+│   │                      unit-wide rules, and advice — each finding in EN and VI
+│   ├── unitdirectives.ts  GENERATED from systemd's own table: every directive and how its
+│   │                      value is read. See scripts/unit-directives.ts
+│   ├── unitdocs.ts        One sentence per common directive, in EN and VI
+│   ├── bytes.ts           Sizes and rates as exact fractions: SI/IEC/bit units, numbers
+│   │                      and units as people type them, transfer time, one-line questions
 │   ├── unicode.ts         Grapheme-safe homoglyph substitution and change records
 │   ├── escape.ts          \uXXXX, \u{…} and \xNN escapes, decode and encode
 │   ├── base64.ts          UTF-8-safe encode/decode, standard and URL-safe
@@ -98,6 +108,7 @@ src/
 │   ├── clipboard.ts       Copy, with a non-secure-context fallback
 │   ├── ui.ts              DOM helpers. See §4.
 │   ├── textio.ts          DOM wiring for the two-pane text tools. See §4.
+│   ├── lang.ts            DOM: the language switch of a bilingual page. See §4, §5.
 │   └── wordlists/         BIP39, superhero and EFF short as string modules;
 │                          heroes.ts, Marvel and DC names by word
 │
@@ -108,10 +119,12 @@ src/
 │                          under the title for a page's own section links
 │
 ├── components/            Presentational. No tool-specific logic.
-│   ├── Header.astro       Links to the four tool groups on the home page
+│   ├── Header.astro       Links to the six tool groups on the home page
 │   ├── ToolGroupNav.astro Sibling strip at the top of every tool page
 │   ├── Footer.astro
 │   ├── ThemeToggle.astro  Self-contained: markup + style + script
+│   ├── Say.astro          One string in both languages, for bilingual pages (§5)
+│   ├── LangSwitch.astro   English / Tiếng Việt radios under a bilingual page's title
 │   ├── Icon.astro         Renders 24×24 stroked SVG from path data
 │   ├── ToolCard.astro     Home page / "more tools" card
 │   ├── RangeField.astro   Slider + typed number box + step buttons
@@ -144,15 +157,28 @@ src/
 │       ├── epoch-converter.astro
 │       ├── lunar-calendar.astro
 │       ├── transaction-code-decoder.astro
-│       └── crontab-generator.astro
+│       ├── crontab-generator.astro
+│       ├── systemd-oncalendar.astro
+│       ├── systemd-unit-analyzer.astro
+│       └── byte-converter.astro
 │
 └── styles/global.css      Design tokens, light + dark, all component styles
+
+scripts/
+├── verify.ts              The harness: runs every check below, owns the exit code
+├── verify-tools.ts, verify-cron.ts, verify-cert.ts
+├── verify-systemd.ts      OnCalendar, against systemd-analyze where it can be run
+├── verify-units.ts        Unit files and time spans, against systemd-analyze verify
+├── verify-bytes.ts        The byte and throughput converter
+└── unit-directives.ts     Writes src/lib/unitdirectives.ts from systemd's gperf table
 ```
 
-Rough scale: 8801 lines of logic in `lib/`, 681 of components and layouts, 7663 of pages, 2545 of
-CSS, 3812 of verification. The wordlist modules are generated and excluded from that count. The
-certificate stack (`asn1` through `certgen`) is about 2,500 of the `lib/` total — the largest
-single feature in the project, and the reason §8.6 exists.
+Rough scale: 15,668 lines in `lib/`, 834 of components and layouts, 10,372 of pages, 3,091 of
+CSS, 6,000 of verification and generators. The wordlist modules are generated and excluded from
+that count; `unitdirectives.ts` is generated too but small. Two features dominate `lib/`: the
+certificate stack (`asn1` through `certgen`, about 2,500 lines, and the reason §8.6 exists) and
+the systemd pair, `oncalendar.ts` and `unitfile.ts`, about 5,100 — most of it ports of systemd's
+own parsers, which is what lets §9 hold them to systemd line for line.
 
 ---
 
@@ -176,11 +202,11 @@ exercises them in Node, with no jsdom and no browser harness. Statistical proper
 uniformity need hundreds of thousands of iterations to test meaningfully, which is only practical
 because there is no DOM in the way.
 
-**Two files in `lib/` are exceptions**, both DOM-only by nature: `ui.ts` (`el`, `attachCopy`,
-`renderStrength`, `attachBulk`, `bindStepper`, `loadPrefs`) and `textio.ts`, which wires the
-two-pane text tools. They live in `lib/` because several pages import them, not because they fit
-the rule. They are deliberately the only files there that do, and the verification scripts import
-neither.
+**Three files in `lib/` are exceptions**, all DOM-only by nature: `ui.ts` (`el`, `attachCopy`,
+`renderStrength`, `attachBulk`, `bindStepper`, `loadPrefs`), `textio.ts`, which wires the
+two-pane text tools, and `lang.ts`, which switches a bilingual page between its two languages.
+They live in `lib/` because several pages import them, not because they fit the rule. They are
+deliberately the only files there that do, and the verification scripts import none of them.
 
 The page `<script>` blocks are thin: read the form into an options object, hand it to a `lib/`
 function, write the result into the markup. They contain no generation logic and no arithmetic.
@@ -200,19 +226,20 @@ interface Tool {
   keywords: readonly string[];
   icon: string;         // inner markup of a 24×24 stroked SVG
   status: 'live' | 'planned';
-  group: 'network' | 'security' | 'data' | 'time' | 'other';
+  group: 'network' | 'security' | 'data' | 'time' | 'system' | 'other';
+  bilingual?: boolean;  // the page is written in English and Vietnamese, with a switch
   vi: { name: string; tagline: string; description?: string };  // see "Page language" below
 }
 ```
 
-`TOOL_GROUPS` fixes the order and the display names (English and Vietnamese) of the five groups.
+`TOOL_GROUPS` fixes the order and the display names (English and Vietnamese) of the six groups.
 
 Everything derives from it:
 
 | Consumer | Uses |
 |---|---|
 | `pages/index.astro` | `TOOL_GROUPS` + `liveToolsIn` for one grid per group, `PLANNED_TOOLS` for the roadmap |
-| `components/Header.astro` | `TOOL_GROUPS` for four links to `/#<group>` |
+| `components/Header.astro` | `TOOL_GROUPS` for one link per group, to `/#<group>` |
 | `components/ToolGroupNav.astro` | `liveToolsIn(tool.group)` for the sibling strip |
 | `layouts/ToolLayout.astro` | `toolBySlug` for the h1, description, JSON-LD; the rest for "more tools", same group first |
 | `pages/sitemap.xml.ts` | `LIVE_TOOLS` only — planned tools never reach the sitemap |
@@ -233,10 +260,11 @@ entry a `vi` name and tagline too — the Vietnamese page lists every tool in it
 
 ### Tool groups
 
-Nineteen tools do not fit in a header, and a flat grid of them buries related tools among
-unrelated ones. So every tool belongs to one of five groups — **Network**, **Security**,
-**Data formats**, **Date & time**, **Other** — and the group is what the navigation is built
-from:
+Twenty-two tools do not fit in a header, and a flat grid of them buries related tools among
+unrelated ones. So every tool belongs to one of six groups — **Network**, **Security**,
+**Data formats**, **Date & time**, **System**, **Other** — and the group is what the navigation
+is built from. **System** holds the three tools for the machines things run on: the crontab
+generator, which moved there from Date & time, and the two systemd tools beside it.
 
 - **Home page** — one titled section per group (`id="network"` and so on), in `TOOL_GROUPS`
   order. Sections carry `scroll-margin-top` so the sticky header does not cover a heading
@@ -262,9 +290,32 @@ badge, the "more tools" cards, the theme toggle's labels, and the JSON-LD `inLan
 strings live in `src/data/i18n.ts`. The copy buttons' "Copied" feedback is chosen in `lib/ui.ts`
 from `<html lang>`, so it needs no wiring per page.
 
-Only the lunar calendar uses it today (§6.13). The page content itself is written directly in the
-page; there is no message catalogue, because no page exists in two languages. The brand name,
-*Technical Toolkit*, stays as it is in both.
+The lunar calendar uses it (§6.13). The brand name, *Technical Toolkit*, stays as it is in both.
+
+**Bilingual pages.** A page can also be written in both languages at once — `lang="both"`, the
+default for a registry entry marked `bilingual: true`. The systemd OnCalendar explainer, the unit
+file analyzer and the byte converter are. Every string is rendered twice, side by side, by
+`Say.astro`: `<span data-l="en">…</span><span data-l="vi">…</span>`; two CSS rules hide the
+language not chosen, keyed on `data-lang` on `<html>`. Attributes that cannot hold two strings —
+`placeholder`, `aria-label`, `title` — carry both as `data-en-*` and `data-vi-*` and are swapped by
+`lib/lang.ts`. What a page script draws is built in the chosen language and redrawn when it
+changes (`onLangChange`).
+
+- **Which language first.** An inline script in `<head>`, before first paint, takes `?lang=` if
+  present, then the reader's earlier choice, then the browser's language — Vietnamese for `vi`,
+  English otherwise — so there is no flash of the other language and no server involved.
+- **The switch** is a pair of radios under the title (`LangSwitch.astro`). A choice made there is
+  the only one remembered (`tt-lang`); a language inferred from the browser is not written down.
+- **Both languages are in the HTML**, so search engines index both, and the prose and tables
+  still read without script — in English, since only the script can choose. The cost is a page
+  about a third heavier in HTML, which is cheap next to its script.
+- **Chrome follows the page**: header, footer, breadcrumb, sibling strip, more-tools cards, privacy
+  badge and theme toggle all render both languages on a bilingual page. Tool pages that are not
+  bilingual are untouched.
+
+Prose is written for each language rather than translated word for word; the two versions of a
+sentence say the same thing, and the checks (§9) assert that every finding and note the
+analyzers produce has both, and that the two differ.
 
 ---
 
@@ -806,8 +857,8 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
 - **Theme** — light / dark / system, cycled by one header button, stored as `tt-theme`. A
   synchronous inline script in `<head>` applies it before first paint, so a dark-theme visitor
   never sees a white flash.
-- **Pages** — home, about, privacy, 404, and nineteen tools in five groups (§5, *Tool groups*).
-- **Navigation** — header links to the five groups; a sibling strip on every tool page.
+- **Pages** — home, about, privacy, 404, and twenty-two tools in six groups (§5, *Tool groups*).
+- **Navigation** — header links to the six groups; a sibling strip on every tool page.
 - **SEO** — per-page title, description, canonical URL, Open Graph and Twitter card tags,
   `WebApplication` JSON-LD on tool pages, generated `sitemap.xml` and `robots.txt`.
 - **Prefetch** — Astro prefetches links on hover.
@@ -1039,6 +1090,142 @@ those are the three things a sign-up form asks for.
   produce the same username.
 - Only the four settings are stored (`tt-username`); generated names are not.
 
+### 6.22 systemd OnCalendar explainer — `/tools/systemd-oncalendar/`
+
+Bilingual (§5). Paste the value of a timer's `OnCalendar=` — one expression per line, or a whole
+`.timer` file, whose `OnCalendar=` lines are read as systemd reads them, an empty one clearing
+those above it. Each expression becomes a card:
+
+- **Normalized form**, exactly as `systemd-analyze calendar` prints it, with a copy button — and,
+  where systemd 259 would mishandle the expression, a **safer form** that means the same times.
+- **A sentence** in English or Vietnamese, and a table of the fields as stored and as expanded.
+- **Notes** for what surprises people: `weekly` is Monday; a weekday and a date must *both*
+  match (the opposite of cron); a two-digit year; a range cut back to its last step; a day some
+  months lack; `~` counting back from the month's end; sub-minute schedules and `AccuracySec=`;
+  an old zone name such as `Asia/Saigon`.
+- **Next runs** in the server's zone, with clock changes labelled: a skipped wall time does not
+  run that day, a repeated one runs once, the first time.
+
+With two or more lines, a merged list shows when the timer as a whole elapses, line by line.
+*Coming from cron?* converts a five-field crontab schedule into one `OnCalendar=` line — or two,
+when cron's day-of-month OR day-of-week has no single-line equivalent.
+
+| Control | Options | Default |
+|---|---|---|
+| Server time zone | every zone the browser knows | the browser's own |
+| Count from | now, or a wall time in the server's zone | now |
+
+`lib/oncalendar.ts` is a port of systemd 259's `calendarspec.c`, rule for rule:
+
+- **Parsing** in systemd's order — zone suffix, shorthand, weekdays, date (or `@epoch`), time —
+  with its limits (years 1970–2199, 241 list items, seconds to six decimals). A refusal says why,
+  and names the likely intent: a crontab line, `*/15`, an ISO `T`, a UTC offset (with the
+  `Etc/GMT` spelling to use instead), a lower-case zone, a three-letter abbreviation.
+- **Normalizing** as `normalize_chain` does — steps cut to their last value, repeats folded,
+  lists sorted and de-duplicated — and printing as `format_chain` does, so the text matches
+  `systemd-analyze` character for character.
+- **Elapsing** by systemd's own search, wall clock first, including two things it gets wrong.
+  A step with no end — `00/7` — runs past the end of its field, and systemd 259 normalises the
+  overflow into the next unit and resumes in the wrong place: a run is lost at a month boundary,
+  and near a clock change the search can give up with *Infinite loop in calendar calculation*,
+  after which the timer stops. `nextElapses` reproduces both — which runs are lost, and where it
+  gives up — and the list shows them struck through and explained. Steps that land exactly on the
+  next unit (`*:0/15`, `0/6:00`) are unaffected; `boundedForm` rewrites the others (`00..21/7`).
+- **Zones** through `Intl`, with systemd's case rules and a table of the aliases browsers resolve
+  differently from tzdata (`Asia/Saigon`, `Europe/Kiev`, `US/*`).
+
+The unit analyzer (§6.23) links here with the expression in the URL fragment, `#expr=…`, which
+the browser never sends to a server. Only the zone is stored (`tt-oncalendar`).
+
+### 6.23 systemd unit file analyzer — `/tools/systemd-unit-analyzer/`
+
+Bilingual (§5). Paste a unit file — one, several pasted one after another, or the output of
+`systemctl cat` with its `# /path` lines and drop-ins — or open one, or drop it on the box. An
+optional file name sets the unit's type when nothing in the paste does. Four samples cover the
+common shapes, including a service with the usual mistakes.
+
+What comes back:
+
+- **A verdict per unit**: systemd would refuse to load it; or it loads but ignores so many lines;
+  or it reads every line.
+- **Findings, in line order**, each tagged with its severity and with who says so — *systemd
+  logs this* (a line systemd itself complains about), *systemd, about the unit* (a rule checked
+  once all files are read), or *advice* (systemd says nothing; the page does). A finding names its
+  line, which selects it in the box, and offers the line to write instead, with a copy button.
+- **What the unit does**: type, command, user, restart policy, triggers and schedule for a
+  timer, what enabling it does.
+- **Every setting, line by line**, with a sentence on what it does (`unitdocs.ts`, English and
+  Vietnamese, for about a hundred common ones) and a link to its entry in systemd's manual.
+
+`lib/unitfile.ts` reads in three layers, each a port of systemd 259:
+
+1. **The file format** (`conf-parser.c`): `#` and `;` comments, skipped even inside a continued
+   line; a trailing backslash continuing a line (a backslash followed by spaces does not — advice);
+   a continuation the file never finishes numbered one past the end, as systemd numbers it; the
+   BOM; case-sensitive section and key names; `X-` sections and keys ignored silently; a broken
+   section header stopping the file. `[Install]` is read by `systemctl enable`, not by the
+   loader, so its findings are advice.
+2. **Each value**, by the parser systemd uses for that key. The directive table,
+   `unitdirectives.ts`, is generated from systemd's own `load-fragment-gperf.gperf.in` by
+   `scripts/unit-directives.ts` — 535 names, each with a one-letter kind naming its parser — and
+   regenerating it is how the analyzer follows a new systemd. The ports include
+   `extract_first_word` with C escapes, `config_parse_exec` (prefixes `-@:|+!`, `;` separators,
+   specifier expansion with the right table per setting), `parse_time`, `parse_size`,
+   `parse_permyriad`, `safe_atou` with its 0x/0o/0b prefixes, signals, user names (relaxed and
+   strict), unit names, paths, resource limits, environment assignments and documentation URLs.
+   Lines systemd *refuses* — a relative `ExecStart=` path, an unknown `%` specifier in a command,
+   an invalid `User=`, a relative `WorkingDirectory=` — are errors, and systemd stops reading the
+   file there.
+3. **The unit as a whole**: `service_verify()` in its order (no `ExecStart=`, two of them outside
+   `Type=oneshot`, `Restart=always` on a oneshot, `Type=dbus` without `BusName=`…) and its
+   warnings, `timer_verify()`, and a second `Unit=` in a timer.
+
+**Drop-ins behave as systemd makes them behave**: lists add up, so a drop-in's `ExecStart=`
+without an empty line before it gives the service two (the fix offered is both lines); a fatal
+line in a drop-in stops only that drop-in and the unit still loads; a fatal line in the unit
+file itself means its drop-ins are never read, which the page says on each of them.
+
+**Advice** covers what systemd accepts in silence: `date +%Y-%m-%d` in a command, where `%Y`,
+`%m`, `%d` are systemd's own specifiers; shell syntax (`>`, `|`, `&&`, `$(…)`, a trailing `&`)
+with no shell to read it; `sudo`; a misspelt capability, which systemd drops without a word;
+`Restart=` with the default 100 ms pause; `network-online.target` wanted but not ordered after; a
+timer without `[Install]`, or only relative triggers; a service a timer starts that is also
+enabled at boot; an `OnCalendar=` step systemd 259 mishandles (§6.22).
+
+Nothing is stored: a unit file can name hosts, paths and credentials.
+
+### 6.24 Byte & throughput converter — `/tools/byte-converter/`
+
+Bilingual (§5). The question it exists for is in its description: 5 TB over 1 Gbps takes
+40,000 seconds — 11 h 6 min 40 s, about 11.1 hours.
+
+- **Ask in one line.** A size and a speed give the time (`5 TB @ 1 Gbps`); a size and a time, the
+  speed needed (`1 TB in 2 h`); a speed and a time, what it moves (`300 Mbps for 1 day`); a size
+  or a speed followed by a unit converts (`1 TB to GiB`). Joining words in English or Vietnamese
+  (`qua`, `trong`, `sang`), times as systemd writes them or in Vietnamese words (`2 giờ 30 phút`).
+- **Sizes** — one value in every decimal, binary and bit unit, side by side.
+- **Speeds** — every bit and byte rate, and what the speed moves per minute, hour, day and 30 days.
+- **How long will it take?** — the same sum with numbers and unit menus, for a phone.
+- **Reference tables**, computed at build time by the same code: disk sizes against what Windows
+  shows (why a 1 TB drive is 931 GB), and common link speeds with the time to move 1 GB and 1 TB.
+
+| Control | Options | Default |
+|---|---|---|
+| Of the link's speed, data gets | line rate · TCP over Ethernet, MTU 1500 (1448 of 1538 bytes, 94.1%) · 90% · 80% | line rate |
+
+`lib/bytes.ts` decisions:
+
+- **Exact fractions.** Every quantity is a ratio of two BigInts counted in bits, bits per second
+  or seconds. Rounding happens once, when a number is printed, with `≈` in front when it was.
+- **Units by the standards** — k, M, G… powers of 1000; Ki, Mi, Gi… powers of 1024; b a bit, B a
+  byte — **read forgivingly**: `500gb` is gigabytes and `mbps` megabits per second, as people mean
+  them, and the page says when it read a unit that way. `KB` is read as 1000 bytes, with a note
+  that Windows and RAM often mean 1024.
+- **Numbers in the page's language.** `1.5` and `1,5` are both one and a half; a single separator
+  followed by exactly three digits is a thousands separator in the page's language — `1,000` in
+  English, `1.000` in Vietnamese — and output is grouped the same way.
+- Only the overhead choice is stored (`tt-bytes`).
+
 ---
 
 ## 7. Design system
@@ -1219,7 +1406,7 @@ side effect of this tool.
 ## 9. Verification
 
 ```bash
-npm run verify   # 1,063 checks, Node, no browser
+npm run verify   # 1,637 checks, Node, no browser — about two minutes with systemd reachable
 npm run check    # astro check — TypeScript across .astro and .ts
 npm run build    # runs check first, then the static build
 ```
@@ -1375,6 +1562,47 @@ than the list. A dedicated check pins the hyphenated entry so the quirk stays on
   each, the shape of 300 draws under six settings, each universe drawing only its own heroes, bulk
   lists that never repeat, all hundred two-digit endings reached with the leading zero kept, and
   one-digit endings uniform over 100,000 draws.
+- **systemd OnCalendar** — 405 checks in `verify-systemd.ts`. Pinned answers recorded from
+  systemd 259: 140 normalized forms, 43 refusals with their reasons, 66 descriptions in both
+  languages, notes, and 75 elapses around real clock changes in New York, Lord Howe, London and
+  Santiago, including where systemd 259 skips a run or gives up. An **independent matcher** —
+  the normalized text expanded into sets and matched minute by minute, sharing no code with the
+  library — checks 500 random expressions, and 300 crontab schedules converted to `OnCalendar=`
+  must elapse exactly when `cron.ts` says cron runs them. Then **systemd itself**: where
+  `systemd-analyze` can be run (Linux, or WSL on Windows), 1,136 generated expressions — random
+  ones, steps that overflow near a clock change in seven zones, steps across midnight, month and
+  year ends — go to `systemd-analyze calendar` and to the library, and the validity, the
+  normalized text and every elapse must agree, including every case where systemd cannot schedule
+  at all. Without systemd these are skipped, as the OpenSSL checks are.
+- **systemd unit files** — `verify-units.ts`. 47 pinned cases assert every finding of a unit
+  file with the usual mistakes, line by line, with the line it offers instead; every finding and
+  fact has an English and a different Vietnamese sentence. Then **`systemd-analyze verify`**:
+  every directive systemd 259 knows, each with a pool of good and bad values for its kind —
+  4,283 one-line files — plus 250 generated whole files with mistakes mixed in (wrong case, stray
+  lines, continuations, comments, broken headers) and 120 units with drop-ins pasted as
+  `systemctl cat` prints them. For each, systemd and the analyzer must agree on which lines systemd
+  complains about, whether at warning level or quieter, what it says about the unit, and whether it
+  loads at all. Verify runs with `--recursive-errors=no` where it can, which is nine times faster but
+  silences the warnings about dependencies, so files with `After=`, `Wants=` and the like run in
+  full.
+- **Time spans** — 24 pinned readings of `parse_time` (`5Min` is months and then fails, `10 20` is
+  thirty seconds, `12.34.56` is refused), and 400 generated spans read by `systemd-analyze
+  timespan`, compared exactly — in BigInt, since a span past 285 years no longer fits a double —
+  and printed identically, dot notation included.
+- **Bytes** — 82 checks in `verify-bytes.ts`: the units exactly (1 TiB is 1,099.511627776 GB),
+  the sum the page exists for (5 TB at 1 Gbps is exactly 40,000 seconds, said in both languages,
+  and 11 h 48 min 6 s over TCP and Ethernet), numbers as people type them in each language, units
+  as people write them and which ones carry a note, and 18 one-line questions with what each is
+  read as.
+
+**What the systemd oracle found.** Holding the libraries to systemd rather than to its manual
+turned up behaviour the manual does not describe, and the pages now say what systemd actually
+does: the overflow in uneven steps and the *Infinite loop* it ends in at a clock change (§6.22);
+that a fatal line in a drop-in does not stop the unit loading, while one in the unit file stops its
+drop-ins from being read; that a percent sign before a letter systemd does not know is fatal in a
+command line but only a warning elsewhere; that `CPUSchedulingPolicy=` and `IOSchedulingClass=`
+take numbers as well as names; that conditions take `|` and `!` with no space after them; and that
+an unknown capability name is dropped without a word above debug level.
 
 Run it after touching anything in `src/lib/`.
 
@@ -1420,6 +1648,12 @@ Bundle sizes as built (gzip in brackets):
 | Lunar page script | 7.7 KB (3.6 KB) | lunar calendar page |
 | Transaction code page script | 7.7 KB (3.4 KB) | transaction code page |
 | Crontab page script, `cron.ts` included | 33.7 KB (13.1 KB) | crontab page |
+| OnCalendar library, `oncalendar.ts` | 47.0 KB (17.2 KB) | OnCalendar and unit analyzer pages |
+| OnCalendar page script | 16.7 KB (6.9 KB) | OnCalendar page |
+| Unit analyzer page script, `unitfile.ts`, the directive table and `unitdocs.ts` included | 129.7 KB (43.2 KB) | unit analyzer page |
+| Time span library | 2.4 KB (1.0 KB) | unit analyzer and byte converter pages |
+| Byte converter page script, `bytes.ts` included | 18.9 KB (7.0 KB) | byte converter page |
+| Language switch, `lang.ts` + its page hook | 0.9 KB (0.6 KB) | bilingual pages |
 | IPv6 library | 5.3 KB (2.4 KB) | IPv6 page and the three range tools |
 | Range library | 4.9 KB (2.1 KB) | range, aggregator and splitter pages |
 | Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |
@@ -1429,7 +1663,11 @@ Bundle sizes as built (gzip in brackets):
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
 | js-yaml | 58.2 KB (17.4 KB) | YAML page, on demand |
 
-A tool page is about 6 KB of gzipped JavaScript before the wordlist.
+A tool page is about 6 KB of gzipped JavaScript before the wordlist. The unit analyzer is the
+outlier, at about 66 KB with the OnCalendar library it reads timers with: most of it is the two
+sentences, English and Vietnamese, behind each of its findings, and the parsers ported from
+systemd. That is a deliberate trade for saying exactly what systemd does in both languages; gap 21
+records how to halve it.
 
 Vercel needs no configuration beyond `vercel.json`, which pins the build command, output
 directory, headers and caching. **Set `SITE_URL`** once a custom domain is attached — it feeds
@@ -1470,9 +1708,10 @@ Honest list, in rough order of how much they matter:
    offer.
 7. **CSP allows `'unsafe-inline'` for scripts.** Reasoning in §8.5; the tradeoff is deliberate,
    not an oversight.
-8. **Localisation is one page deep.** The chrome can render in Vietnamese (§5, *Page language*),
-   but only the lunar calendar page does, and its nav and footer link to pages that are English.
-   There is no language switcher and no second-language version of any page.
+8. **Localisation is four pages deep.** The lunar calendar is Vietnamese, and the two systemd
+   tools and the byte converter are written in both languages with a switch (§5, *Bilingual
+   pages*). Every other page is English, so a Vietnamese reader who follows a link from one of
+   those lands in English. The crontab page only describes schedules in Vietnamese.
 9. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
    such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
    word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
@@ -1514,18 +1753,53 @@ Honest list, in rough order of how much they matter:
     `x509.ts` already do most of the work the decoder idea in §12 called for, but there is no page
     that takes a PEM and explains it.
 18. **The crontab explainer speaks one dialect, and its DST model has no live witness.** It reads
-    Vixie cron, cronie and Debian's cron; systemd `OnCalendar`, Kubernetes' `timeZone` field and
-    AWS's six-field expressions are not read, and Quartz is refused rather than converted. The
+    Vixie cron, cronie and Debian's cron; systemd `OnCalendar` has its own page now (§6.22), but
+    Kubernetes' `timeZone` field and AWS's six-field expressions are not read, and Quartz is
+    refused rather than converted. The
     daylight-saving behaviour follows cronie's main loop as described in §6.20 and is checked
     against the zone database and an independent matcher — not against a running cron daemon,
     which the machine this was built on does not have. Vietnamese covers the sentence and the
     field meanings only; the run list's relative times ("in 3 days") stay English.
+19. **The unit analyzer reads the file, not the machine.** It cannot know whether the programs,
+    users, paths and other units a unit names exist, which `systemd-analyze verify` on the server
+    does check. About a hundred directives whose values have a grammar of their own —
+    `SystemCallFilter=`, `RestrictAddressFamilies=`, `DeviceAllow=`, `IPAddressAllow=`,
+    `LoadCredential=` and the like — are recognised but their values are not checked. Socket,
+    mount, path and swap units get the generic checks and the shared exec settings, not the
+    unit-wide rules a `.service` and a `.timer` do.
+20. **Both systemd tools are pinned to systemd 259.** The directive table regenerates from a new
+    systemd's source in one command, but the ported parsers, the pinned answers and systemd 259's
+    step overflow do not follow on their own: a later release that fixes the overflow, renames a
+    setting or loosens a parser needs the oracle run against it, which the suite does whenever the
+    WSL distribution's systemd is upgraded — and then fails, rather than drifts.
+21. **The unit analyzer's page is heavy** (§10): every message ships in both languages. Splitting
+    the messages into one module per language and loading the other only when the switch is
+    used would roughly halve it; the OnCalendar library could also load only when a timer is
+    pasted.
 
 ---
 
 ## 12. Roadmap and ideas
 
 A running record of what was decided, what is done, and what is next. Newest decisions first.
+
+### Decisions on the systemd tools and the byte converter
+
+Made while building §6.22–§6.24:
+
+| Question | Decision |
+|---|---|
+| Page language | **Both, with a switch** (§5) — the tools were asked for in English and Vietnamese, and a page per language would split one tool in two |
+| A new group? | **System**, with the crontab generator moved into it — the three tools for scheduling and running services |
+| Which systemd? | **259**, the release the WSL distribution ships, ported from its source and held to its own `systemd-analyze` |
+| Explain what systemd says, or what it means? | **What it does**, including its mistakes — a timer that skips runs is described as skipping them, with the fix beside it |
+| Directive list by hand, or generated? | **Generated** from systemd's gperf table, so the analyzer knows exactly what systemd knows |
+| Keep reading after a line that stops systemd? | **No** — systemd does not, and a list of problems systemd would never have reached would mislead |
+| Advice that systemd does not give? | **Yes, labelled as advice** — `date +%F`, shell syntax and a timer that cannot be enabled are the mistakes people make most |
+| Store the pasted unit file? | **Never** — it can name hosts, paths and credentials |
+| Byte arithmetic in floats? | **No: exact fractions** — 5 TB at 1 Gbps must be 40,000 seconds, not 39,999.99… |
+| `gb` and `mbps`: by the standard, or as meant? | **As meant**, with a note saying how it was read |
+| Thousands separators | **The page's language decides** a lone `1,000` or `1.000` |
 
 ### Decisions on the username generator
 
@@ -1593,10 +1867,11 @@ Asked and answered before building §6.14:
 |---|---|
 | Generators | Password and passphrase generators, entropy readout, bulk mode; username generator from Marvel and DC hero names |
 | Data formats | Base64, hash (MD5/SHA-256/SHA-512), JSON with syntax highlighting, YAML, Unicode text spoofer with code-point changes, Unicode escape converter |
-| Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator |
-| Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar; crontab generator and explainer with next runs across clock changes |
+| Network | Subnet calculator with cheat sheet and canonical CIDR, IP range to CIDR, CIDR aggregator/supernet, CIDR splitter, IPv6 calculator; byte and throughput converter — SI and IEC units, bit rates, transfer time in one line |
+| Date & time | Epoch converter with two-way quick convert and DST-aware wall time; Vietnamese lunar calendar |
+| System | Crontab generator and explainer with next runs across clock changes; systemd OnCalendar explainer held to `systemd-analyze calendar`; systemd unit file analyzer held to `systemd-analyze verify` |
 | Certificates | Root CA, CA-signed certificates and CSRs; purpose-driven key usage and EKU; PEM, PKCS#12 and JKS export |
-| Site | Tool groups on the home page, group links in the header, sibling strip, Vietnamese chrome for the lunar page |
+| Site | Tool groups on the home page, group links in the header, sibling strip, Vietnamese chrome for the lunar page, bilingual pages with a language switch |
 
 ### In progress
 
@@ -1628,17 +1903,17 @@ Nothing is half-built. Every tool in the registry marked `live` is complete and 
 
 Collected while planning; all fit the static, nothing-leaves-the-browser constraint in §1.
 
-- ~~**Cron expression explainer**~~ — built as §6.20, with a builder beside it. systemd
-  `OnCalendar` is still not read (gap 18).
+- ~~**Cron expression explainer**~~ — built as §6.20, with a builder beside it; systemd
+  `OnCalendar` got its own page, §6.22.
 - **chmod / umask calculator** — octal ↔ `rwx` ↔ symbolic, with setuid/setgid/sticky.
 - **Regex tester** — JavaScript dialect, stated as such; matches, named groups, replacement preview.
 - ~~**Certificate / CSR decoder**~~ — promoted to the list above now that §6.14 has written the
   ASN.1 reader that was "the real work".
 - **MAC address tool** — format normalisation, EUI-64, U/L and multicast bits, and an OUI vendor
   lookup (the one idea with a sizeable dataset, ~300 KB lazy-loaded).
-- **URL parser and encoder**, **data size and transfer-time calculator**, **HMAC** (a small
-  extension of the hash tool), **TOTP code generator**, **config format converter**
-  (JSON ↔ YAML ↔ TOML ↔ `.env`).
+- **URL parser and encoder**, **HMAC** (a small extension of the hash tool), **TOTP code
+  generator**, **config format converter** (JSON ↔ YAML ↔ TOML ↔ `.env`).
+- ~~**Data size and transfer-time calculator**~~ — built as §6.24.
 - **IPv6 in the subnet calculator** — see gap 10.
 
 Deliberately out of scope: anything that needs a server or a third-party API — ping, traceroute,

@@ -1,12 +1,15 @@
 ---
 import { SITE } from "../data/site";
-import { CHROME, type Lang } from "../data/i18n";
+import { CHROME, type PageLang } from "../data/i18n";
+import Say from "./Say.astro";
 
 interface Props {
-  lang?: Lang;
+  lang?: PageLang;
 }
 
-const text = CHROME[Astro.props.lang ?? "en"];
+const lang = Astro.props.lang ?? "en";
+const both = lang === "both";
+const text = CHROME[both ? "en" : lang];
 
 const year = new Date().getFullYear();
 ---
@@ -14,9 +17,9 @@ const year = new Date().getFullYear();
 <footer class="site-footer">
   <div class="container site-footer__inner">
     <span>&copy; {year} {SITE.name}</span>
-    <span>{text.footerNote}</span>
+    <span>{both ? <Say en={CHROME.en.footerNote} vi={CHROME.vi.footerNote} /> : text.footerNote}</span>
     <span class="site-footer__spacer"></span>
-    <a href="/about/">{text.about}</a>
-    <a href="/privacy/">{text.privacy}</a>
+    <a href="/about/">{both ? <Say en={CHROME.en.about} vi={CHROME.vi.about} /> : text.about}</a>
+    <a href="/privacy/">{both ? <Say en={CHROME.en.privacy} vi={CHROME.vi.privacy} /> : text.privacy}</a>
   </div>
 </footer>

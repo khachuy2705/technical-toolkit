@@ -1,0 +1,18 @@
+---
+/**
+ * English | Tiếng Việt, for a bilingual page. Each language is named in its
+ * own words, so neither needs translating.
+ */
+import { bothAttr } from "../data/i18n";
+---
+
+<div class="segmented lang-switch" role="radiogroup" {...bothAttr("aria-label", "Language", "Ngôn ngữ")}>
+  <label><input type="radio" name="page-lang" value="en" checked /><span lang="en">English</span></label>
+  <label><input type="radio" name="page-lang" value="vi" /><span lang="vi">Tiếng Việt</span></label>
+</div>
+
+<script>
+  import { bindLangSwitch } from "../lib/lang";
+
+  bindLangSwitch();
+</script>

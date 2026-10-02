@@ -2610,3 +2610,482 @@ select {
 [data-describe="vi"] [data-lang="en"] {
   display: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Bilingual pages
+
+   A page rendered with lang="both" carries its words twice, marked data-l="en"
+   and data-l="vi". The inline script in BaseLayout sets data-lang on <html>
+   before first paint; with no script it is never set and the page reads in
+   English. !important because the rule has to beat any display a component
+   gives the same element.
+--------------------------------------------------------------------------- */
+
+:root:not([data-lang="vi"]) [data-l="vi"],
+:root[data-lang="vi"] [data-l="en"] {
+  display: none !important;
+}
+
+/* The title shares its line with the language switch, which wraps below it
+   on a phone rather than squeezing it. */
+.tool-head__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.tool-head__title h1 {
+  margin-bottom: 0;
+}
+
+.lang-switch {
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   systemd OnCalendar explainer
+
+   Reuses the crontab job card, run list and output box; these are the few
+   shapes it adds.
+--------------------------------------------------------------------------- */
+
+.cal-from {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.cal-from .text-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cal-from .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.cal-input {
+  --io-min-height: 6.5rem;
+}
+
+.cal-normal {
+  font-size: clamp(1rem, 2.6vw, 1.3rem);
+}
+
+/* A run systemd 259 would skip: listed where it falls, struck through. */
+.cal-run--lost {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.cal-run__lines {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.cal-convert {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.cal-convert:empty {
+  display: none;
+}
+
+.cal-convert__notes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------------------------------------------------------------------------
+   systemd unit file analyzer
+
+   A finding is a bordered row whose left edge carries its severity; the
+   suggested line under it copies as written. Uses the sheet table for the
+   settings and the facts.
+--------------------------------------------------------------------------- */
+
+.unit-input {
+  --io-min-height: 18rem;
+}
+
+.unit-options {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem);
+  margin-top: 0.9rem;
+}
+
+.unit-out {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.unit-out:empty {
+  display: none;
+}
+
+.unit-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.9rem;
+}
+
+.unit-count {
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.unit-count b {
+  color: var(--text);
+}
+
+.unit-count--error b {
+  color: var(--strength-0);
+}
+
+.unit-count--warning b {
+  color: var(--strength-2);
+}
+
+.unit-verdicts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unit-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-subtle);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.unit-verdict--warn {
+  border-left-color: var(--strength-2);
+}
+
+.unit-verdict--refused {
+  border-left-color: var(--strength-0);
+}
+
+.unit-verdict__name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.unit-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unit-finding {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--strength-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.unit-finding--warning {
+  border-left-color: var(--strength-2);
+}
+
+.unit-finding--error {
+  border-left-color: var(--strength-0);
+  background: color-mix(in srgb, var(--strength-0) 5%, var(--surface));
+}
+
+.unit-finding__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  min-width: 0;
+}
+
+.unit-tag {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.unit-tag--error {
+  border-color: color-mix(in srgb, var(--strength-0) 50%, var(--border));
+  color: var(--strength-0);
+}
+
+.unit-tag--warning {
+  border-color: color-mix(in srgb, var(--strength-2) 50%, var(--border));
+  color: var(--strength-2);
+}
+
+.unit-tag--note {
+  border-color: color-mix(in srgb, var(--strength-3) 50%, var(--border));
+  color: var(--strength-3);
+}
+
+.unit-tag--source {
+  font-weight: 500;
+}
+
+.unit-finding__line {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
+.unit-finding__line:hover {
+  color: var(--accent-hover);
+}
+
+.unit-finding__code {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.unit-finding__text {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.unit-finding__extras {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.unit-finding__link {
+  font-size: 0.8rem;
+}
+
+.unit-fix {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.unit-fix__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.unit-fix__code {
+  min-width: 0;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.unit-card__type {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.unit-card__files {
+  margin: -0.4rem 0 0.9rem;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.unit-facts {
+  margin-bottom: 1rem;
+}
+
+.unit-settings > summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.6rem;
+}
+
+.unit-setting code {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.sheet tr[data-ignored] .unit-setting code {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.unit-setting__ignored {
+  font-weight: 600;
+  color: var(--strength-2);
+}
+
+.unit-setting__man {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Settings and the mistakes table hold whole lines of a unit file: they wrap
+   rather than push the table wider than the page. */
+.sheet td.unit-setting {
+  white-space: normal;
+  min-width: 12rem;
+  max-width: 28rem;
+}
+
+.unit-mistakes th,
+.unit-mistakes td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 9rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Byte and throughput converter
+--------------------------------------------------------------------------- */
+
+.bytes-hint {
+  margin-top: 0.7rem;
+}
+
+.bytes-overhead {
+  max-width: 26rem;
+  margin-top: 1rem;
+}
+
+.bytes-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 40%, var(--surface));
+}
+
+.bytes-answer:empty {
+  display: none;
+}
+
+.bytes-answer p {
+  margin: 0;
+}
+
+.bytes-answer .output__error {
+  margin: 0;
+}
+
+.bytes-answer__big {
+  font-family: var(--font-mono);
+  font-size: clamp(1.35rem, 4.5vw, 1.9rem);
+  font-weight: 650;
+  line-height: 1.25;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.bytes-answer__line {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.bytes-answer__line:nth-child(2) {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.bytes-answer__notes {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bytes-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(6.5rem, auto);
+  gap: 0.5rem;
+  max-width: 24rem;
+}
+
+.bytes-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.bytes-tables:empty {
+  display: none;
+}
+
+.bytes-table__caption {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-raised);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.bytes-table__value {
+  user-select: all;
+}

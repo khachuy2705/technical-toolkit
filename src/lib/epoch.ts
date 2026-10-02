@@ -544,10 +544,10 @@ const RELATIVE_STEPS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[
   ["second", 1000],
 ];
 
-export function relativeToNow(ms: number, now: number): string {
+export function relativeToNow(ms: number, now: number, lang: "en" | "vi" = "en"): string {
   const diff = ms - now;
-  if (Math.abs(diff) < 1000) return "right now";
-  const format = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
+  if (Math.abs(diff) < 1000) return lang === "vi" ? "ngay bây giờ" : "right now";
+  const format = new Intl.RelativeTimeFormat(lang, { numeric: "auto" });
   for (const [unit, size] of RELATIVE_STEPS) {
     if (Math.abs(diff) >= size) return format.format(Math.trunc(diff / size), unit);
   }

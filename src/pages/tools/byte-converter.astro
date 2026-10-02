@@ -1,0 +1,603 @@
+---
+/**
+ * Byte and throughput converter. Written in English and Vietnamese: every
+ * string on the page is said twice and the switch under the title shows one
+ * (see Say.astro); what the script draws follows `pageLang()`.
+ */
+import ToolLayout from "../../layouts/ToolLayout.astro";
+import Say from "../../components/Say.astro";
+import { bothAttr } from "../../data/i18n";
+import { EFFICIENCIES, RATE_UNITS, SIZE_UNITS, compare, formatDuration, formatNumber, inUnit, rateUnit, ratio, sizeUnit, transferTime } from "../../lib/bytes";
+
+const QUICK = ["5 TB @ 1 Gbps", "100 GiB @ 500 Mbps", "4,7 GB qua 300 Mbps", "1 TB in 2 h", "300 Mbps for 1 day", "1 TB to GiB", "1 Gbps in MB/s"];
+
+const SIZE_GROUPS = [
+  { label: { en: "Bytes, powers of 1000", vi: "Byte, luỹ thừa của 1000" }, family: "decimal" },
+  { label: { en: "Bytes, powers of 1024", vi: "Byte, luỹ thừa của 1024" }, family: "binary" },
+  { label: { en: "Bits", vi: "Bit" }, family: "bit" },
+] as const;
+
+/** Built from the library, in both languages, so the tables cannot disagree with the tool. */
+const DISKS = ["128 GB", "256 GB", "500 GB", "512 GB", "1 TB", "2 TB", "4 TB", "8 TB", "12 TB", "20 TB"].map((label) => {
+  const [amount, symbol] = label.split(" ") as [string, string];
+  const bits = ratio(BigInt(amount) * sizeUnit(symbol).bits);
+  const binary = symbol === "GB" ? sizeUnit("GiB") : sizeUnit("TiB");
+  // Windows divides by 1024 and keeps the SI letters: GB below a tebibyte, TB from there.
+  const terabytes = compare(inUnit(bits, sizeUnit("TiB")), ratio(1n)) >= 0;
+  const shown = inUnit(bits, sizeUnit(terabytes ? "TiB" : "GiB"));
+  const gap = 100 * (1 - (1000 / 1024) ** (terabytes ? 4 : 3));
+  const say = (lang: "en" | "vi") => ({
+    binary: `${formatNumber(inUnit(bits, binary), lang, 4)} ${binary.symbol}`,
+    windows: `${formatNumber(shown, lang, 4)} ${terabytes ? "TB" : "GB"}`,
+    gap: `${gap.toFixed(1).replace(".", lang === "vi" ? "," : ".")}%`,
+  });
+  return { label, en: say("en"), vi: say("vi") };
+});
+
+const LINKS = [
+  { speed: "10 Mbit/s", n: 10n, name: { en: "old Ethernet, slow DSL", vi: "Ethernet cũ, ADSL chậm" } },
+  { speed: "100 Mbit/s", n: 100n, name: { en: "Fast Ethernet, a basic home plan", vi: "Fast Ethernet, gói cước gia đình cơ bản" } },
+  { speed: "300 Mbit/s", n: 300n, name: { en: "a common fibre plan", vi: "gói cáp quang phổ biến" } },
+  { speed: "1 Gbit/s", n: 1000n, name: { en: "Gigabit Ethernet", vi: "Gigabit Ethernet" } },
+  { speed: "2.5 Gbit/s", n: 2500n, name: { en: "2.5GBASE-T", vi: "2.5GBASE-T" } },
+  { speed: "10 Gbit/s", n: 10_000n, name: { en: "10 Gigabit Ethernet", vi: "10 Gigabit Ethernet" } },
+  { speed: "25 Gbit/s", n: 25_000n, name: { en: "a server uplink", vi: "đường lên của máy chủ" } },
+  { speed: "100 Gbit/s", n: 100_000n, name: { en: "a data-centre spine", vi: "đường trục trung tâm dữ liệu" } },
+].map((link) => {
+  const rate = ratio(link.n * 1_000_000n);
+  const time = (bytes: bigint, lang: "en" | "vi") => formatDuration(transferTime(ratio(bytes * 8n), rate), lang);
+  return {
+    ...link,
+    mbs: { en: formatNumber(inUnit(rate, rateUnit("MB/s")), "en", 5), vi: formatNumber(inUnit(rate, rateUnit("MB/s")), "vi", 5) },
+    gb: { en: time(1_000_000_000n, "en"), vi: time(1_000_000_000n, "vi") },
+    tb: { en: time(1_000_000_000_000n, "en"), vi: time(1_000_000_000_000n, "vi") },
+  };
+});
+---
+
+<ToolLayout slug="byte-converter">
+  <section class="card">
+    <div class="io__head">
+      <label class="io__label" for="quick"><Say en="Ask in one line" vi="Hỏi trong một dòng" /></label>
+    </div>
+    <input
+      type="text"
+      id="quick"
+      class="big-input"
+      value="5 TB @ 1 Gbps"
+      spellcheck="false"
+      autocomplete="off"
+      autocapitalize="off"
+      autocorrect="off"
+      {...bothAttr("placeholder", "5 TB @ 1 Gbps", "5 TB @ 1 Gbps")}
+    />
+    <div class="preset-row">
+      {QUICK.map((preset) => <button type="button" class="btn btn--tiny" data-quick={preset}>{preset}</button>)}
+    </div>
+    <p class="field__hint bytes-hint">
+      <Say
+        en="A size and a speed give the time; a size and a time, the speed it needs; a speed and a time, what it moves; “to GiB” converts. Joining words in English or Vietnamese — at, over, in, for, to, qua, trong, sang."
+        vi="Dung lượng và tốc độ cho ra thời gian; dung lượng và thời gian cho ra tốc độ cần có; tốc độ và thời gian cho ra lượng dữ liệu; “sang GiB” để đổi đơn vị. Từ nối bằng tiếng Anh hay tiếng Việt đều được — at, over, in, for, to, qua, trong, sang."
+      />
+    </p>
+    <div class="field bytes-overhead">
+      <label class="field__label" for="overhead"><Say en="Of the link's speed, data gets" vi="Phần tốc độ đường truyền dành cho dữ liệu" /></label>
+      <select id="overhead">
+        {EFFICIENCIES.map((efficiency) => (
+          <option value={efficiency.id} data-en={efficiency.name.en} data-vi={efficiency.name.vi}>{efficiency.name.en}</option>
+        ))}
+      </select>
+    </div>
+    <div class="bytes-answer" id="quick-out" aria-live="polite"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Sizes" vi="Dung lượng" /></h2>
+    <div class="bytes-pair">
+      <label class="visually-hidden" for="size-number"><Say en="Amount" vi="Giá trị" /></label>
+      <input type="text" id="size-number" class="text-input" inputmode="decimal" value="1" autocomplete="off" spellcheck="false" />
+      <label class="visually-hidden" for="size-unit"><Say en="Unit" vi="Đơn vị" /></label>
+      <select id="size-unit">
+        {
+          SIZE_GROUPS.map((group) => (
+            <optgroup label={group.label.en} data-en={group.label.en} data-vi={group.label.vi}>
+              {SIZE_UNITS.filter((unit) => unit.family === group.family).map((unit) => (
+                <option value={unit.symbol} selected={unit.symbol === "TB"}>{unit.symbol}</option>
+              ))}
+            </optgroup>
+          ))
+        }
+      </select>
+    </div>
+    <p class="output__error" id="size-error" role="alert" hidden></p>
+    <div class="bytes-tables" id="size-out"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Speeds" vi="Tốc độ" /></h2>
+    <div class="bytes-pair">
+      <label class="visually-hidden" for="rate-number"><Say en="Amount" vi="Giá trị" /></label>
+      <input type="text" id="rate-number" class="text-input" inputmode="decimal" value="300" autocomplete="off" spellcheck="false" />
+      <label class="visually-hidden" for="rate-unit"><Say en="Unit" vi="Đơn vị" /></label>
+      <select id="rate-unit">
+        {
+          SIZE_GROUPS.map((group) => (
+            <optgroup label={group.label.en} data-en={group.label.en} data-vi={group.label.vi}>
+              {RATE_UNITS.filter((unit) => unit.family === group.family).map((unit) => (
+                <option value={unit.symbol} selected={unit.symbol === "Mbit/s"}>{unit.symbol}</option>
+              ))}
+            </optgroup>
+          ))
+        }
+      </select>
+    </div>
+    <p class="output__error" id="rate-error" role="alert" hidden></p>
+    <div class="bytes-tables" id="rate-out"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="How long will it take?" vi="Mất bao lâu?" /></h2>
+    <div class="controls">
+      <div class="field">
+        <span class="field__label" id="tx-size-label"><Say en="Size" vi="Dung lượng" /></span>
+        <div class="bytes-pair" role="group" aria-labelledby="tx-size-label">
+          <input type="text" id="tx-size" class="text-input" inputmode="decimal" value="50" autocomplete="off" spellcheck="false" {...bothAttr("aria-label", "Size", "Dung lượng")} />
+          <select id="tx-size-unit" {...bothAttr("aria-label", "Size unit", "Đơn vị dung lượng")}>
+            {SIZE_UNITS.map((unit) => <option value={unit.symbol} selected={unit.symbol === "GB"}>{unit.symbol}</option>)}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field__label" id="tx-rate-label"><Say en="Speed" vi="Tốc độ" /></span>
+        <div class="bytes-pair" role="group" aria-labelledby="tx-rate-label">
+          <input type="text" id="tx-rate" class="text-input" inputmode="decimal" value="100" autocomplete="off" spellcheck="false" {...bothAttr("aria-label", "Speed", "Tốc độ")} />
+          <select id="tx-rate-unit" {...bothAttr("aria-label", "Speed unit", "Đơn vị tốc độ")}>
+            {RATE_UNITS.map((unit) => <option value={unit.symbol} selected={unit.symbol === "Mbit/s"}>{unit.symbol}</option>)}
+          </select>
+        </div>
+      </div>
+    </div>
+    <p class="output__error" id="tx-error" role="alert" hidden></p>
+    <div class="bytes-answer" id="tx-out" aria-live="polite"></div>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Why a 1 TB disk shows 931 GB" vi="Vì sao ổ 1 TB chỉ hiện 931 GB" /></h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          <Say en="Disk sizes as sold, in powers of 1000, and as an operating system counting in powers of 1024 shows them." vi="Dung lượng ổ đĩa khi bán, theo luỹ thừa của 1000, và khi hệ điều hành đếm theo luỹ thừa của 1024 hiển thị." />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="On the box" vi="Trên vỏ hộp" /></th>
+            <th scope="col"><Say en="In binary units" vi="Theo đơn vị nhị phân" /></th>
+            <th scope="col"><Say en="Windows shows" vi="Windows hiển thị" /></th>
+            <th scope="col"><Say en="Gap" vi="Chênh lệch" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            DISKS.map((disk) => (
+              <tr data-common={disk.label === "1 TB" ? "" : undefined}>
+                <th scope="row" class="sheet__key">{disk.label}</th>
+                <td><Say en={disk.en.binary} vi={disk.vi.binary} /></td>
+                <td><Say en={disk.en.windows} vi={disk.vi.windows} /></td>
+                <td class="sheet__num"><Say en={disk.en.gap} vi={disk.vi.gap} /></td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      <Say
+        en="Nothing is missing. Drive makers count a terabyte as 1,000,000,000,000 bytes; Windows divides by 1024 three times and still writes GB. The gap grows with every prefix: 2.3% at kilo, 6.9% at giga, 9.1% at tera."
+        vi="Không có gì bị mất. Nhà sản xuất tính một terabyte là 1.000.000.000.000 byte; Windows chia cho 1024 ba lần mà vẫn ghi GB. Khoảng chênh tăng theo từng tiền tố: 2,3% ở kilo, 6,9% ở giga, 9,1% ở tera."
+      />
+    </p>
+  </section>
+
+  <section class="card">
+    <h2 class="card__title"><Say en="Common link speeds" vi="Các tốc độ đường truyền thường gặp" /></h2>
+    <div class="table-wrap">
+      <table class="sheet">
+        <caption class="visually-hidden">
+          <Say en="Link speeds, what they carry each second, and the time to move 1 GB and 1 TB at the full line rate." vi="Các tốc độ đường truyền, lượng dữ liệu mỗi giây, và thời gian để truyền 1 GB và 1 TB ở tốc độ tối đa." />
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col"><Say en="Link" vi="Đường truyền" /></th>
+            <th scope="col">MB/s</th>
+            <th scope="col"><Say en="1 GB takes" vi="1 GB mất" /></th>
+            <th scope="col"><Say en="1 TB takes" vi="1 TB mất" /></th>
+            <th scope="col"><Say en="Typically" vi="Thường là" /></th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            LINKS.map((link) => (
+              <tr data-common={link.speed === "1 Gbit/s" ? "" : undefined}>
+                <th scope="row" class="sheet__key">{link.speed}</th>
+                <td class="sheet__num"><Say en={link.mbs.en} vi={link.mbs.vi} /></td>
+                <td><Say en={link.gb.en} vi={link.gb.vi} /></td>
+                <td><Say en={link.tb.en} vi={link.tb.vi} /></td>
+                <td class="sheet__prose"><Say en={link.name.en} vi={link.name.vi} /></td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+    <p class="field__hint" style="margin-top:0.75rem">
+      <Say
+        en="At the full line rate. Real transfers run slower: TCP over Ethernet carries about 94% of it as data, and disks, Wi-Fi and the far end often set a lower ceiling still."
+        vi="Ở tốc độ tối đa của đường truyền. Thực tế chậm hơn: TCP qua Ethernet chỉ dành khoảng 94% cho dữ liệu, và ổ đĩa, Wi-Fi hay phía bên kia thường còn giới hạn thấp hơn nữa."
+      />
+    </p>
+  </section>
+
+  <section class="card prose" data-l="en">
+    <h2>Two kinds of gigabyte</h2>
+    <p>
+      The SI prefixes — kilo, mega, giga, tera — mean powers of 1000, and that is what disk makers, network
+      speeds and macOS use: 1 GB is 1,000,000,000 bytes. Memory comes in powers of 1024, and the IEC gave
+      those their own names in 1998 — kibi, mebi, gibi, tebi, written KiB, MiB, GiB, TiB — so 1 GiB is
+      1,073,741,824 bytes. Windows, and a lot of older software, counts in powers of 1024 but prints the
+      SI letters, which is why a 1 TB drive shows up as 931 GB.
+    </p>
+
+    <h2>Bits and bytes</h2>
+    <p>
+      A byte is eight bits. Storage is counted in bytes, written with a capital B; links are sold in bits
+      per second, with a small b — Mbps, Gbps. Divide by eight to go from one to the other: a 300 Mbps plan
+      moves at most 37.5 MB/s, and a download that shows 35 MB/s is using it well. Case matters: Mb is a
+      megabit, MB a megabyte. People do not always write it that way, so this page reads <code>500gb</code>
+      as gigabytes and <code>mbps</code> as megabits per second, and says when it did.
+    </p>
+
+    <h2>Why transfers take longer than the sum</h2>
+    <p>
+      A link's speed counts every bit on the wire, and not all of them are your data. Over Ethernet each
+      1,500-byte packet travels with 38 bytes of framing, and inside it IP and TCP headers take 52 more, so
+      at best 1,448 of every 1,538 bytes are the file — 94.1%. Pick that under the one-line box to see the
+      difference; on Wi-Fi, across the world or to a slow disk, the real ceiling is lower still.
+    </p>
+
+    <h2>What this page reads</h2>
+    <p>
+      Numbers in either language: 1.5 or 1,5, and thousands as 1,000 in English or 1.000 in Vietnamese.
+      Every sum is done in exact fractions, so 5 TB at 1 Gbps comes out at exactly 40,000 seconds before it
+      is rounded for display. Everything runs in your browser; only the overhead choice is remembered,
+      never what you type.
+    </p>
+  </section>
+
+  <section class="card prose" data-l="vi">
+    <h2>Hai loại gigabyte</h2>
+    <p>
+      Các tiền tố SI — kilo, mega, giga, tera — là luỹ thừa của 1000, và đó là cách nhà sản xuất ổ đĩa,
+      tốc độ mạng và macOS dùng: 1 GB là 1.000.000.000 byte. Bộ nhớ thì tính theo luỹ thừa của 1024, và năm
+      1998 IEC đặt tên riêng cho chúng — kibi, mebi, gibi, tebi, viết là KiB, MiB, GiB, TiB — nên 1 GiB là
+      1.073.741.824 byte. Windows và nhiều phần mềm cũ đếm theo luỹ thừa của 1024 nhưng lại in ký hiệu SI,
+      vì vậy ổ 1 TB chỉ hiện 931 GB.
+    </p>
+
+    <h2>Bit và byte</h2>
+    <p>
+      Một byte là tám bit. Dung lượng lưu trữ tính bằng byte, viết chữ B hoa; đường truyền được bán theo bit
+      mỗi giây, viết chữ b thường — Mbps, Gbps. Chia cho tám để đổi qua lại: gói cước 300 Mbps truyền tối đa
+      37,5 MB/s, và tải xuống ở 35 MB/s là đã dùng gần hết. Chữ hoa chữ thường có nghĩa: Mb là megabit, MB là
+      megabyte. Không phải ai cũng viết đúng như vậy, nên trang này hiểu <code>500gb</code> là gigabyte và
+      <code>mbps</code> là megabit mỗi giây, và có ghi chú khi làm thế.
+    </p>
+
+    <h2>Vì sao truyền thật lâu hơn con số tính ra</h2>
+    <p>
+      Tốc độ đường truyền tính mọi bit trên dây, mà không phải bit nào cũng là dữ liệu của bạn. Qua Ethernet,
+      mỗi gói 1.500 byte đi kèm 38 byte khung truyền, và bên trong gói, phần đầu IP và TCP chiếm thêm 52 byte,
+      nên tốt nhất cũng chỉ 1.448 trên 1.538 byte là nội dung file — 94,1%. Hãy chọn mức đó ở dưới ô hỏi
+      nhanh để thấy khác biệt; qua Wi-Fi, qua nửa vòng trái đất hay tới một ổ đĩa chậm, giới hạn thực tế còn
+      thấp hơn nữa.
+    </p>
+
+    <h2>Trang này đọc những gì</h2>
+    <p>
+      Số viết theo cả hai ngôn ngữ: 1.5 hay 1,5, và hàng nghìn là 1,000 khi trang ở tiếng Anh hoặc 1.000 khi
+      ở tiếng Việt. Mọi phép tính dùng phân số chính xác, nên 5 TB ở 1 Gbps ra đúng 40.000 giây trước khi
+      được làm tròn để hiển thị. Mọi thứ chạy trong trình duyệt của bạn; trang chỉ ghi nhớ lựa chọn phần
+      dành cho dữ liệu, không bao giờ ghi nhớ những gì bạn nhập.
+    </p>
+  </section>
+</ToolLayout>
+
+<script>
+  import {
+    EFFICIENCIES,
+    RATE_UNITS,
+    SIZE_UNITS,
+    approximateDuration,
+    bestUnit,
+    formatAmount,
+    formatDuration,
+    formatNumber,
+    inUnit,
+    mul,
+    parseNumber,
+    parseQuick,
+    rateFor,
+    rateUnit,
+    ratio,
+    sizeFor,
+    sizeUnit,
+    transferTime,
+    unitName,
+    volumes,
+    type DataUnit,
+    type Family,
+    type Quantity,
+    type Ratio,
+  } from "../../lib/bytes";
+  import { all, el, loadPrefs, savePrefs } from "../../lib/ui";
+  import { onLangChange, pageLang } from "../../lib/lang";
+  import type { Both } from "../../data/i18n";
+
+  const PREFS_KEY = "tt-bytes";
+  const say = (text: Both): string => text[pageLang()];
+  const both = (en: string, vi: string): Both => ({ en, vi });
+
+  const quickInput = el<HTMLInputElement>("#quick");
+  const quickOut = el<HTMLElement>("#quick-out");
+  const overhead = el<HTMLSelectElement>("#overhead");
+
+  function node<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+    const made = document.createElement(tag);
+    if (className) made.className = className;
+    if (text !== undefined) made.textContent = text;
+    return made;
+  }
+
+  const prefs = loadPrefs(PREFS_KEY, { overhead: "line" });
+  if (EFFICIENCIES.some((efficiency) => efficiency.id === prefs.overhead)) overhead.value = prefs.overhead;
+  const share = (): Ratio => (EFFICIENCIES.find((efficiency) => efficiency.id === overhead.value) ?? EFFICIENCIES[0]!).share;
+  const fullRate = (): boolean => overhead.value === "line";
+
+  const num = (value: Ratio, significant = 6) => formatNumber(value, pageLang(), significant);
+  const amount = (bits: Ratio, family: Family, units: readonly DataUnit[] = SIZE_UNITS, significant = 4) => formatAmount(bits, family, pageLang(), units, significant);
+
+  /** How a quantity was read, so a surprising unit shows: “5 TB — 5 terabytes”. */
+  function readAs(quantity: Quantity): string {
+    const unit = quantity.unit;
+    if (!unit) return quantity.source;
+    const value = inUnit(quantity.value, unit);
+    return `${num(value, 12)} ${unit.symbol} (${unitName(unit, value, pageLang())})`;
+  }
+
+  function answer(big: string, rest: readonly string[], notes: readonly Both[] = []): HTMLElement[] {
+    const nodes: HTMLElement[] = [node("p", "bytes-answer__big", big)];
+    for (const line of rest) nodes.push(node("p", "bytes-answer__line", line));
+    if (notes.length > 0) {
+      const list = node("ul", "notes bytes-answer__notes");
+      for (const note of notes) list.append(node("li", "notes__item", say(note)));
+      nodes.push(list);
+    }
+    return nodes;
+  }
+
+  function overheadLine(): string {
+    if (fullRate()) return say(both("At the full line rate.", "Ở tốc độ tối đa của đường truyền."));
+    const chosen = EFFICIENCIES.find((efficiency) => efficiency.id === overhead.value)!;
+    return say(both(`With ${num(mul(chosen.share, ratio(100n)), 3)}% of the line rate carrying data.`, `Với ${num(mul(chosen.share, ratio(100n)), 3)}% tốc độ đường truyền dành cho dữ liệu.`));
+  }
+
+  function runQuick(): void {
+    quickOut.replaceChildren();
+    const text = quickInput.value;
+    if (text.trim() === "") return;
+    const asked = parseQuick(text, pageLang());
+    if ("error" in asked) {
+      quickOut.append(node("p", "output__error", say(asked.error)));
+      return;
+    }
+    const notes = Object.values(asked)
+      .filter((part): part is Quantity => typeof part === "object" && part !== null && "note" in part)
+      .map((quantity) => quantity.note)
+      .filter((note, index, list): note is Both => note !== null && list.findIndex((other) => other?.en === note.en) === index);
+
+    if (asked.kind === "time") {
+      const seconds = transferTime(asked.size.value, asked.rate.value, share());
+      const other = transferTime(asked.size.value, asked.rate.value, fullRate() ? EFFICIENCIES[1]!.share : ratio(1n));
+      quickOut.append(
+        ...answer(formatDuration(seconds, pageLang()), [
+          approximateDuration(seconds, pageLang()),
+          say(both(`${readAs(asked.size)} at ${readAs(asked.rate)}. ${overheadLine()}`, `${readAs(asked.size)} ở tốc độ ${readAs(asked.rate)}. ${overheadLine()}`)),
+          fullRate()
+            ? say(both(`Over TCP and Ethernet, at best 94.1% of that: ${formatDuration(other, "en")}.`, `Qua TCP và Ethernet, tối đa 94,1% tốc độ đó: ${formatDuration(other, "vi")}.`))
+            : say(both(`At the full line rate: ${formatDuration(other, "en")}.`, `Ở tốc độ tối đa của đường truyền: ${formatDuration(other, "vi")}.`)),
+        ], notes),
+      );
+      return;
+    }
+    if (asked.kind === "rate-needed") {
+      const bps = rateFor(asked.size.value, asked.time.value, share());
+      quickOut.append(
+        ...answer(amount(bps, "bit", RATE_UNITS), [
+          `= ${amount(bps, "decimal", RATE_UNITS)} = ${amount(bps, "binary", RATE_UNITS)}`,
+          say(both(`To move ${readAs(asked.size)} in ${formatDuration(asked.time.value, "en")}. ${overheadLine()}`, `Để truyền ${readAs(asked.size)} trong ${formatDuration(asked.time.value, "vi")}. ${overheadLine()}`)),
+        ], notes),
+      );
+      return;
+    }
+    if (asked.kind === "size-moved") {
+      const bits = sizeFor(asked.rate.value, asked.time.value, share());
+      quickOut.append(
+        ...answer(amount(bits, "decimal"), [
+          `= ${amount(bits, "binary")} = ${amount(bits, "bit")}`,
+          say(both(`${readAs(asked.rate)} for ${formatDuration(asked.time.value, "en")}. ${overheadLine()}`, `${readAs(asked.rate)} trong ${formatDuration(asked.time.value, "vi")}. ${overheadLine()}`)),
+        ], notes),
+      );
+      return;
+    }
+    if (asked.kind === "size") {
+      const bits = asked.size.value;
+      const target = asked.target;
+      const big = target ? `${num(inUnit(bits, target), 9)} ${target.symbol}` : amount(bits, asked.size.unit?.family === "binary" ? "decimal" : "binary", SIZE_UNITS, 6);
+      quickOut.append(
+        ...answer(big, [
+          `= ${amount(bits, "decimal", SIZE_UNITS, 6)} = ${amount(bits, "binary", SIZE_UNITS, 6)} = ${amount(bits, "bit", SIZE_UNITS, 6)}`,
+          say(both(`Read as ${readAs(asked.size)}.`, `Được hiểu là ${readAs(asked.size)}.`)),
+        ], notes),
+      );
+      return;
+    }
+    const bps = asked.rate.value;
+    const target = asked.target;
+    const big = target ? `${num(inUnit(bps, target), 9)} ${target.symbol}` : amount(bps, asked.rate.unit?.family === "bit" ? "decimal" : "bit", RATE_UNITS, 6);
+    quickOut.append(
+      ...answer(big, [
+        `= ${amount(bps, "bit", RATE_UNITS, 6)} = ${amount(bps, "decimal", RATE_UNITS, 6)} = ${amount(bps, "binary", RATE_UNITS, 6)}`,
+        say(both(`Read as ${readAs(asked.rate)}. A day of it moves ${amount(mul(bps, ratio(86_400n)), "decimal")}.`, `Được hiểu là ${readAs(asked.rate)}. Một ngày ở tốc độ này truyền được ${amount(mul(bps, ratio(86_400n)), "decimal")}.`)),
+      ], notes),
+    );
+  }
+
+  /* ------------------------------------------------------------------- tables */
+
+  const GROUPS: readonly { family: Family; label: Both }[] = [
+    { family: "decimal", label: both("Bytes, powers of 1000", "Byte, luỹ thừa của 1000") },
+    { family: "binary", label: both("Bytes, powers of 1024", "Byte, luỹ thừa của 1024") },
+    { family: "bit", label: both("Bits", "Bit") },
+  ];
+
+  function unitTable(bits: Ratio, family: Family, units: readonly DataUnit[], label: Both, chosen: DataUnit): HTMLElement {
+    const wrap = node("div", "table-wrap");
+    const table = node("table", "sheet bytes-table");
+    const caption = node("caption", "bytes-table__caption", say(label));
+    const body = node("tbody");
+    const best = bestUnit(bits, family, units);
+    for (const unit of units.filter((candidate) => candidate.family === family)) {
+      const tr = node("tr");
+      if (unit === best || unit === chosen) tr.dataset["common"] = "";
+      const th = node("th", "sheet__key", unit.symbol);
+      th.scope = "row";
+      tr.append(th, node("td", "sheet__num bytes-table__value", num(inUnit(bits, unit), 9)));
+      body.append(tr);
+    }
+    table.append(caption, body);
+    wrap.append(table);
+    return wrap;
+  }
+
+  function readNumber(input: HTMLInputElement, error: HTMLElement): Ratio | null {
+    error.hidden = true;
+    const value = parseNumber(input.value, pageLang());
+    if (value === null && input.value.trim() !== "") {
+      error.textContent = say(both(`“${input.value.trim()}” is not a number.`, `“${input.value.trim()}” không phải là số.`));
+      error.hidden = false;
+    }
+    return value;
+  }
+
+  function runSizes(): void {
+    const out = el<HTMLElement>("#size-out");
+    out.replaceChildren();
+    const value = readNumber(el<HTMLInputElement>("#size-number"), el<HTMLElement>("#size-error"));
+    if (value === null) return;
+    const unit = sizeUnit(el<HTMLSelectElement>("#size-unit").value);
+    const bits = mul(value, ratio(unit.bits));
+    for (const group of GROUPS) out.append(unitTable(bits, group.family, SIZE_UNITS, group.label, unit));
+  }
+
+  function runRates(): void {
+    const out = el<HTMLElement>("#rate-out");
+    out.replaceChildren();
+    const value = readNumber(el<HTMLInputElement>("#rate-number"), el<HTMLElement>("#rate-error"));
+    if (value === null) return;
+    const unit = rateUnit(el<HTMLSelectElement>("#rate-unit").value);
+    const bps = mul(value, ratio(unit.bits));
+    for (const group of [GROUPS[2]!, GROUPS[0]!, GROUPS[1]!]) out.append(unitTable(bps, group.family, RATE_UNITS, group.label, unit));
+    // What it moves over time.
+    const wrap = node("div", "table-wrap");
+    const table = node("table", "sheet bytes-table");
+    table.append(node("caption", "bytes-table__caption", say(both("Moves, at the full rate", "Truyền được, ở tốc độ tối đa"))));
+    const body = node("tbody");
+    for (const volume of volumes(bps)) {
+      const tr = node("tr");
+      const th = node("th", "sheet__key", say(volume.label));
+      th.scope = "row";
+      tr.append(th, node("td", "sheet__num bytes-table__value", `${amount(volume.bits, "decimal")} · ${amount(volume.bits, "binary")}`));
+      body.append(tr);
+    }
+    table.append(body);
+    wrap.append(table);
+    out.append(wrap);
+  }
+
+  function runTransfer(): void {
+    const out = el<HTMLElement>("#tx-out");
+    out.replaceChildren();
+    const error = el<HTMLElement>("#tx-error");
+    const size = readNumber(el<HTMLInputElement>("#tx-size"), error);
+    const rate = size === null ? null : readNumber(el<HTMLInputElement>("#tx-rate"), error);
+    if (size === null || rate === null) return;
+    if (rate.n === 0n) {
+      error.textContent = say(both("A speed of zero never finishes.", "Tốc độ bằng 0 thì không bao giờ xong."));
+      error.hidden = false;
+      return;
+    }
+    const sizeBits = mul(size, ratio(sizeUnit(el<HTMLSelectElement>("#tx-size-unit").value).bits));
+    const bps = mul(rate, ratio(rateUnit(el<HTMLSelectElement>("#tx-rate-unit").value).bits));
+    const seconds = transferTime(sizeBits, bps, share());
+    const lines = [approximateDuration(seconds, pageLang()), overheadLine()];
+    const perDay = mul(bps, mul(share(), ratio(86_400n)));
+    lines.push(say(both(`In a day it would move ${amount(perDay, "decimal")}.`, `Trong một ngày sẽ truyền được ${amount(perDay, "decimal")}.`)));
+    out.append(...answer(formatDuration(seconds, pageLang()), lines));
+  }
+
+  function runAll(): void {
+    runQuick();
+    runSizes();
+    runRates();
+    runTransfer();
+  }
+
+  /* ------------------------------------------------------------------- wiring */
+
+  function paintOptions(): void {
+    for (const option of all<HTMLOptionElement>("#overhead option")) option.textContent = option.dataset[pageLang()] ?? option.textContent;
+    for (const group of all<HTMLOptGroupElement>("optgroup[data-en]")) group.label = group.dataset[pageLang()] ?? group.label;
+  }
+
+  const debounce = (callback: () => void) => {
+    let timer: number | undefined;
+    return () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(callback, 120);
+    };
+  };
+  quickInput.addEventListener("input", debounce(runQuick));
+  for (const button of all<HTMLButtonElement>("[data-quick]")) {
+    button.addEventListener("click", () => {
+      quickInput.value = button.dataset["quick"] ?? "";
+      runQuick();
+    });
+  }
+  overhead.addEventListener("change", () => {
+    savePrefs(PREFS_KEY, { overhead: overhead.value });
+    runQuick();
+    runTransfer();
+  });
+  el<HTMLInputElement>("#size-number").addEventListener("input", debounce(runSizes));
+  el<HTMLSelectElement>("#size-unit").addEventListener("change", runSizes);
+  el<HTMLInputElement>("#rate-number").addEventListener("input", debounce(runRates));
+  el<HTMLSelectElement>("#rate-unit").addEventListener("change", runRates);
+  for (const id of ["#tx-size", "#tx-rate"]) el<HTMLInputElement>(id).addEventListener("input", debounce(runTransfer));
+  for (const id of ["#tx-size-unit", "#tx-rate-unit"]) el<HTMLSelectElement>(id).addEventListener("change", runTransfer);
+
+  onLangChange(() => {
+    paintOptions();
+    runAll();
+  });
+  paintOptions();
+  runAll();
+</script>

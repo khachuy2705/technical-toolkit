@@ -10,7 +10,7 @@ import type { Lang } from './i18n';
 
 export type ToolStatus = 'live' | 'planned';
 
-export type ToolGroupId = 'network' | 'security' | 'data' | 'time' | 'other';
+export type ToolGroupId = 'network' | 'security' | 'data' | 'time' | 'system' | 'other';
 
 export interface ToolGroup {
   readonly id: ToolGroupId;
@@ -27,6 +27,8 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
   { id: 'security', name: 'Security', vi: 'Bảo mật' },
   { id: 'data', name: 'Data formats', vi: 'Định dạng dữ liệu' },
   { id: 'time', name: 'Date & time', vi: 'Ngày giờ' },
+  // Scheduling and service files for a Linux server: crontab, systemd timers, units.
+  { id: 'system', name: 'System', vi: 'Hệ thống' },
   // Last on purpose: the catch-all for tools that answer one narrow question
   // and have no sibling to sit beside.
   { id: 'other', name: 'Other', vi: 'Khác' },
@@ -56,6 +58,11 @@ export interface Tool {
    * description is only needed for a tool whose own page is Vietnamese.
    */
   readonly vi: { readonly name: string; readonly tagline: string; readonly description?: string };
+  /**
+   * The page is written in English and Vietnamese, with a switch under the
+   * title; ToolLayout renders it with lang="both". Needs `vi.description`.
+   */
+  readonly bilingual?: boolean;
 }
 
 export const TOOLS: readonly Tool[] = [
@@ -236,6 +243,33 @@ export const TOOLS: readonly Tool[] = [
     vi: { name: 'Tính IPv6', tagline: 'Prefix, dải địa chỉ, loại và reverse DNS cho IPv6.' },
   },
   {
+    slug: 'byte-converter',
+    name: 'Byte & Throughput Converter',
+    tagline: 'GiB and GB, Mbps and MB/s, and how long a transfer takes.',
+    description:
+      'Convert data sizes between decimal and binary units — GB and GiB, MB and MiB — and bit rates between Mbps and MB/s, then work out how long a transfer takes, the speed a deadline needs, or what a link moves in a day. 5 TB over 1 Gbps is about 11.1 hours.',
+    keywords: [
+      'byte converter',
+      'gib to gb',
+      'mbps to mb/s',
+      'data transfer time calculator',
+      'bandwidth calculator',
+      'doi don vi du lieu',
+      'tinh thoi gian truyen du lieu',
+      'doi mbps sang mb/s',
+    ],
+    icon: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+    status: 'live',
+    group: 'network',
+    bilingual: true,
+    vi: {
+      name: 'Đổi đơn vị byte & tốc độ truyền',
+      tagline: 'GiB và GB, Mbps và MB/s, và truyền mất bao lâu.',
+      description:
+        'Đổi dung lượng giữa đơn vị thập phân và nhị phân — GB và GiB, MB và MiB — và tốc độ giữa Mbps và MB/s, rồi tính thời gian truyền, tốc độ cần để kịp hạn, hay lượng dữ liệu một đường truyền chuyển được mỗi ngày. 5 TB qua đường 1 Gbps mất khoảng 11,1 giờ.',
+    },
+  },
+  {
     slug: 'epoch-converter',
     name: 'Epoch Converter',
     tagline: 'Unix time in, every calendar reading out.',
@@ -295,10 +329,64 @@ export const TOOLS: readonly Tool[] = [
     ],
     icon: '<path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h5"/><path d="M17.5 17.5 16 16.3V14"/><circle cx="16" cy="16" r="6"/>',
     status: 'live',
-    group: 'time',
+    group: 'system',
     vi: {
       name: 'Tạo & giải thích crontab',
       tagline: 'Chọn giờ, ngày, tháng ra dòng crontab; dán crontab ra lời giải thích.',
+    },
+  },
+  {
+    slug: 'systemd-oncalendar',
+    name: 'systemd OnCalendar Explainer',
+    tagline: "Read a timer's schedule, and see when it fires next.",
+    description:
+      "Paste the OnCalendar= value of a systemd timer and get it normalized exactly as systemd-analyze prints it, said in plain words, and walked forward to its next elapses in any time zone — clock changes and systemd's own mistakes included.",
+    keywords: [
+      'systemd oncalendar',
+      'systemd timer',
+      'oncalendar explained',
+      'systemd-analyze calendar',
+      'systemd timer next run',
+      'cron to systemd timer',
+      'giai thich oncalendar',
+      'lich chay systemd timer',
+    ],
+    icon: '<line x1="10" x2="14" y1="2" y2="2"/><line x1="12" x2="15" y1="14" y2="11"/><circle cx="12" cy="14" r="8"/>',
+    status: 'live',
+    group: 'system',
+    bilingual: true,
+    vi: {
+      name: 'Giải thích OnCalendar của systemd',
+      tagline: 'Đọc lịch của timer và xem khi nào nó chạy tiếp.',
+      description:
+        'Dán giá trị OnCalendar= của một systemd timer để xem dạng chuẩn hoá đúng như systemd-analyze in ra, lời giải thích dễ hiểu, và các lần chạy tiếp theo ở múi giờ bất kỳ — tính cả lúc đổi giờ và những chỗ chính systemd tính sai.',
+    },
+  },
+  {
+    slug: 'systemd-unit-analyzer',
+    name: 'systemd Unit File Analyzer',
+    tagline: 'Paste a .service or .timer, and see every mistake named.',
+    description:
+      'Check a systemd unit file — .service, .timer, .socket and the rest — line by line: sections and directives systemd does not know, values it would refuse, settings in the wrong section, removed options, and the mistakes that stop a unit from starting.',
+    keywords: [
+      'systemd unit file',
+      'systemd service file checker',
+      'systemd-analyze verify',
+      'systemd timer file',
+      'service file validator',
+      'systemd lint',
+      'kiem tra file service systemd',
+      'phan tich unit systemd',
+    ],
+    icon: '<path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m3 15 2 2 4-4"/>',
+    status: 'live',
+    group: 'system',
+    bilingual: true,
+    vi: {
+      name: 'Phân tích file unit systemd',
+      tagline: 'Dán file .service hay .timer, chỉ ra từng lỗi.',
+      description:
+        'Kiểm tra file unit của systemd — .service, .timer, .socket và các loại khác — từng dòng một: mục và chỉ thị systemd không biết, giá trị nó sẽ từ chối, thiết lập đặt sai mục, tuỳ chọn đã bị bỏ, và những lỗi khiến unit không khởi động được.',
     },
   },
   {

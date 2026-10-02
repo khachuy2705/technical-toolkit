@@ -1,15 +1,18 @@
 ---
 import Icon from "./Icon.astro";
+import Say from "./Say.astro";
 import { toolHref, toolText, type Tool } from "../data/tools";
-import { CHROME, type Lang } from "../data/i18n";
+import { CHROME, type PageLang } from "../data/i18n";
 
 interface Props {
   tool: Tool;
-  lang?: Lang;
+  lang?: PageLang;
 }
 
 const { tool, lang = "en" } = Astro.props;
-const text = toolText(tool, lang);
+const both = lang === "both";
+const text = toolText(tool, both ? "en" : lang);
+const vi = toolText(tool, "vi");
 const planned = tool.status === "planned";
 const Tag = planned ? "div" : "a";
 ---
@@ -20,8 +23,12 @@ const Tag = planned ? "div" : "a";
     href={planned ? undefined : toolHref(tool)}
   >
     <Icon paths={tool.icon} size={22} class="tool-card__icon" />
-    <span class="tool-card__name">{text.name}</span>
-    <span class="tool-card__tagline">{text.tagline}</span>
-    {planned && <span class="badge">{CHROME[lang].planned}</span>}
+    <span class="tool-card__name">{both ? <Say en={text.name} vi={vi.name} /> : text.name}</span>
+    <span class="tool-card__tagline">{both ? <Say en={text.tagline} vi={vi.tagline} /> : text.tagline}</span>
+    {
+      planned && (
+        <span class="badge">{both ? <Say en={CHROME.en.planned} vi={CHROME.vi.planned} /> : CHROME[lang].planned}</span>
+      )
+    }
   </Tag>
 </li>

@@ -5,13 +5,17 @@
  * visible icon.
  */
 
-import { CHROME, type Lang } from "../data/i18n";
+import { CHROME, type PageLang } from "../data/i18n";
 
 interface Props {
-  lang?: Lang;
+  lang?: PageLang;
 }
 
-const text = CHROME[Astro.props.lang ?? "en"];
+const lang = Astro.props.lang ?? "en";
+const both = lang === "both";
+const text = CHROME[both ? "en" : lang];
+// A bilingual page carries the Vietnamese words too; the script picks by <html lang>.
+const vi = both ? CHROME.vi : null;
 ---
 
 <button
@@ -26,6 +30,11 @@ const text = CHROME[Astro.props.lang ?? "en"];
   data-name-light={text.themeNames.light}
   data-name-dark={text.themeNames.dark}
   data-name-system={text.themeNames.system}
+  data-prefix-vi={vi?.themePrefix}
+  data-hint-vi={vi?.themeHint}
+  data-name-light-vi={vi?.themeNames.light}
+  data-name-dark-vi={vi?.themeNames.dark}
+  data-name-system-vi={vi?.themeNames.system}
 >
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -109,15 +118,20 @@ const text = CHROME[Astro.props.lang ?? "en"];
       }
 
       button.dataset["active"] = theme;
-      // The words come from the markup, so the page language decides them.
-      const name = button.dataset[`name${theme[0]!.toUpperCase()}${theme.slice(1)}`] ?? theme;
-      button.title = `${button.dataset["prefix"]}: ${name}`;
-      button.setAttribute("aria-label", `${button.dataset["prefix"]}: ${name}. ${button.dataset["hint"]}`);
+      // The words come from the markup, so the page language decides them. A
+      // bilingual page has a Vietnamese set too, used while it reads in Vietnamese.
+      const vi = document.documentElement.lang.startsWith("vi");
+      const words = (key: string) => (vi ? button.dataset[`${key}Vi`] : undefined) ?? button.dataset[key] ?? "";
+      const name = words(`name${theme[0]!.toUpperCase()}${theme.slice(1)}`) || theme;
+      button.title = `${words("prefix")}: ${name}`;
+      button.setAttribute("aria-label", `${words("prefix")}: ${name}. ${words("hint")}`);
     };
 
     apply(read());
     button.addEventListener("click", () => {
       apply(ORDER[(ORDER.indexOf(read()) + 1) % ORDER.length]!);
     });
+    // Sent by lib/lang.ts when the reader switches a bilingual page's language.
+    document.addEventListener("tt:lang", () => apply(read()));
   }
 </script>
