@@ -22,7 +22,7 @@ const CAPITALIZATIONS = [
 ---
 
 <ToolLayout slug="passphrase-generator">
-  <OutputPanel placeholder="Loading wordlists…" generateLabel="Regenerate" />
+  <OutputPanel placeholder="Loading wordlists…" generateLabel="Regenerate" strength={false} />
 
   <section class="card">
     <h2 class="card__title">Options</h2>
@@ -59,7 +59,9 @@ const CAPITALIZATIONS = [
         </div>
         <p class="field__hint">
           Pick more than one to draw from all of them at once. Words shared between lists are
-          counted once, so the pool below is the real number of distinct choices.
+          counted once, so the pool below is the real number of distinct choices. Tarot cards keep
+          their words joined with <code>_</code>, or with <code>-</code> when the separator is an
+          underscore.
         </p>
       </fieldset>
 
@@ -148,30 +150,32 @@ const CAPITALIZATIONS = [
   <section class="card prose">
     <h2>Why a passphrase</h2>
     <p>
-      Six words drawn from BIP39 is 66 bits, and six from BIP39 plus the superhero list is 68 —
+      Six words drawn from BIP39 is 66 bits, and six from BIP39 plus the superhero list is 66.4 —
       in the same league as an eleven-character random password, and something you can hold in your
       head after a couple of readings. The strength comes from the number of words, not from how
       obscure they look.
     </p>
 
-    <h2>How the entropy is counted</h2>
+    <h2>Counting the bits</h2>
     <p>
-      Each word contributes <code>log2(pool size)</code> bits, where the pool is every distinct
-      word across the lists you ticked: 11 bits from BIP39 alone, 10.34 from the EFF short list,
-      6.66 from the superhero list. Random separators add a little per gap; a single randomly
-      uppercased word adds <code>log2(words)</code>. The appended digit and symbol are counted by
-      value only — their random position is real entropy that we deliberately do not claim.
+      Each word is worth <code>log2(pool size)</code> bits, where the pool is every distinct word
+      across the lists you ticked — the figure under the word slider: 11 bits from BIP39 alone,
+      6.66 from the superhero list, 6.29 from the tarot deck. Multiply by the number of words.
+      Random separators add a little per gap, a single randomly uppercased word adds
+      <code>log2(words)</code>, and an appended digit or symbol adds about 3 bits. A separator you
+      choose, and the way tarot names are joined, add nothing: they are part of the scheme, not a
+      secret.
     </p>
     <p>
-      Combining lists helps less than it looks. They overlap heavily — 464 words appear in both
-      BIP39 and the EFF short list — and shared words are counted once, because counting them
-      twice would both overstate the pool and make those words twice as likely to be drawn.
-      Ticking all three gives 2,967 distinct words, 11.54 bits each, against 11 for BIP39 on its
-      own: three lists buy barely half a bit per word.
+      Combining lists helps less than it looks. Shared words are counted once, because counting
+      them twice would both overstate the pool and make those words twice as likely to be drawn —
+      BIP39 and the superhero list share 9 words; the tarot deck shares none. Ticking all three
+      gives 2,218 distinct words, 11.12 bits each, against 11 for BIP39 on its own.
     </p>
     <p>
       A short list is not a weak list, it just needs more words. Roughly two superhero words buy
-      what one BIP39 word does, so eleven of them land near where six BIP39 words do.
+      what one BIP39 word does, so eleven of them land near where six BIP39 words do; a tarot card
+      is worth a little less again, and eleven cards come to 69 bits.
     </p>
 
     <h2>Using it well</h2>
@@ -182,8 +186,9 @@ const CAPITALIZATIONS = [
         costs nothing; editing it does.
       </li>
       <li>
-        Watch the bit count rather than the word count. Whatever list you pick, aim past 72 bits for
-        anything that matters, and past 96 for a password manager&rsquo;s master password.
+        Count bits rather than words: multiply the figure under the slider by the number of words.
+        Whatever list you pick, aim past 72 bits for anything that matters, and past 96 for a
+        password manager&rsquo;s master password.
       </li>
     </ul>
   </section>
@@ -203,7 +208,6 @@ const CAPITALIZATIONS = [
     type SeparatorId,
     type WordlistId,
   } from "../../lib/passphrase";
-  import { passphraseEntropy } from "../../lib/entropy";
   import {
     all,
     attachBulk,
@@ -211,7 +215,6 @@ const CAPITALIZATIONS = [
     bindStepper,
     el,
     loadPrefs,
-    renderStrength,
     savePrefs,
   } from "../../lib/ui";
   import { ICONS } from "../../data/icons";
@@ -231,7 +234,6 @@ const CAPITALIZATIONS = [
   const hint = el<HTMLElement>("#wordlist-hint");
   const result = el<HTMLOutputElement>("#result");
   const errorBox = el<HTMLParagraphElement>("#result-error");
-  const strength = el<HTMLElement>("#strength");
 
   const wordCount = bindStepper("word-count", paint);
 
@@ -334,7 +336,6 @@ const CAPITALIZATIONS = [
       errorBox.hidden = false;
       result.textContent = "—";
       result.dataset["empty"] = "true";
-      renderStrength(strength, 0);
       return;
     }
 
@@ -345,13 +346,11 @@ const CAPITALIZATIONS = [
       result.textContent = generatePassphrase(words, options);
       delete result.dataset["empty"];
       errorBox.hidden = true;
-      renderStrength(strength, passphraseEntropy(options, words.length));
     } catch (error) {
       errorBox.textContent = error instanceof Error ? error.message : "Could not generate.";
       errorBox.hidden = false;
       result.textContent = "—";
       result.dataset["empty"] = "true";
-      renderStrength(strength, 0);
     }
   }
 

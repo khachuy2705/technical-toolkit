@@ -109,7 +109,7 @@ src/
 │   ├── ui.ts              DOM helpers. See §4.
 │   ├── textio.ts          DOM wiring for the two-pane text tools. See §4.
 │   ├── lang.ts            DOM: the language switch of a bilingual page. See §4, §5.
-│   └── wordlists/         BIP39, superhero and EFF short as string modules;
+│   └── wordlists/         BIP39, superhero and tarot as string modules;
 │                          heroes.ts, Marvel and DC names by word
 │
 ├── layouts/
@@ -344,7 +344,7 @@ analyzers produce has both, and that the two differ.
 | Control | Range / options | Default |
 |---|---|---|
 | Word count | 3 – 15 — slider, typed box, or ± buttons | 6 |
-| Wordlists | BIP39 English (2,048), Superheroes (101), EFF Short (1,296) — **any combination** | **BIP39 + Superheroes** |
+| Wordlists | BIP39 English (2,048), Superheroes (101), Tarot cards (78) — **any combination** | **BIP39 + Superheroes** |
 | Separator | hyphen, dot, underscore, space, none, random digit, random symbol, **custom** | hyphen |
 | Custom separator | any text, capped at 8 characters | `-` |
 | Capitalisation | lowercase, Title Case, UPPERCASE, one random word uppercase | lowercase |
@@ -354,22 +354,30 @@ analyzers produce has both, and that the two differ.
 
 - **Lists combine.** Ticking several draws from the union of all of them. Merged pools are cached
   by the exact set that produced them, so toggling a list on and off costs one merge.
-- **Merging deduplicates, and that is correctness rather than tidiness.** The lists overlap
-  heavily — 464 words are in both BIP39 and the EFF short list; all three together hold 2,967
-  distinct words out of 3,445 raw entries. A plain concatenation would do two wrong things at
-  once: report `log2(3,445)` bits for a pool that does not have that many distinct words (0.22
-  bits per word too many), and make every shared word twice as likely to be drawn as an unshared
-  one. The hint under the slider names the pool size and says how many words were shared.
-- Combining buys less than it looks: all three lists together are 11.54 bits per word against 11
-  for BIP39 alone. The pool is what matters, and pools grow logarithmically.
+- **Merging deduplicates, and that is correctness rather than tidiness.** 9 superhero names are
+  also BIP39 words, so the default pool holds 2,140 distinct words, not 2,149. A plain
+  concatenation would do two wrong things at once: report bits for a pool that does not have
+  that many distinct words, and make every shared word twice as likely to be drawn as an
+  unshared one. The hint under the slider names the pool size, its bits per word, and how many
+  words were shared. The tarot list shares none.
+- Combining buys less than it looks: all three lists together are 2,218 words, 11.12 bits per
+  word against 11 for BIP39 alone. The pool is what matters, and pools grow logarithmically.
+- **Tarot names are one entry each.** The list stores all 78 cards as `the_fool`,
+  `ace_of_cups`; `innerJoiner` swaps the `_` for `-` when the phrase separator (fixed or custom)
+  contains an underscore, so a card still reads as one unit — `the_fool-ace_of_cups` under the
+  default hyphen, `the-fool_ace-of-cups` under underscores. It is derived from the settings, so
+  it adds no entropy. A random-symbol separator can still draw `_` or `-` next to a card.
+- **No strength meter.** The page passes `strength={false}` to `OutputPanel`: no tier label, no
+  total bit count, no crack time. The bits per word stay in the hint under the slider, and the
+  prose explains how to multiply them out.
 - Wordlists load via dynamic `import()`, so the password page pays for none of them and a visitor
   who never ticks a list never downloads it. Loaded lists are cached per page view.
 - The custom separator row is revealed only when the separator select is set to Custom. A typed
   separator is part of the scheme, not a secret, so it contributes **zero** bits — stated on the
   page itself rather than left for the user to assume.
 - The shipped default — BIP39 + superheroes, 2,140 distinct words, 6 words plus a digit — is
-  **69.7 bits**, which the meter reports as *Fair*. The superhero list alone would be 43.3 bits and
-  *Weak*; pairing it with BIP39 is what keeps a memorable default from being a bad one.
+  **69.7 bits**. The superhero list alone would be 43.3 bits; pairing it with BIP39 is what keeps
+  a memorable default from being a bad one.
 - The digit and the symbol land on two *different* words when both are requested.
 - Separator and suffix symbol alphabets are separate sets (§8.2).
 
@@ -827,7 +835,8 @@ The generators share `OutputPanel`, `BulkPanel` and `RangeField`; the four text 
   scrolls the page sideways.
 - **Strength meter** — five segments, coloured by tier, plus the raw bit count and an average
   brute-force time. Tiers: Very weak `<36`, Weak `<56`, Fair `<72`, Strong `<96`, Excellent `≥96`.
-  `OutputPanel strength={false}` leaves it out, for output that is not a secret (§6.21).
+  `OutputPanel strength={false}` leaves it out: for output that is not a secret (§6.21), and on
+  the passphrase page, which shows bits per word under the slider instead (§6.2).
 - **Copy** — `navigator.clipboard` with a `execCommand` fallback for non-secure contexts, a
   transient "Copied" label, and an ARIA live region so the flash is announced.
 - **Bulk panel** — count, generate, copy all, download `.txt`, per-row copy.
@@ -1500,13 +1509,15 @@ npm run build    # runs check first, then the static build
   describes.
 
 **Structural passphrase assertions draw from BIP39, deliberately.** They split a phrase on its
-separator to count words, and the EFF short list ships a hyphenated entry (`yo-yo`) that breaks
-that assumption. BIP39 contains no punctuation at all, so the assertion tests the generator rather
-than the list. A dedicated check pins the hyphenated entry so the quirk stays on record.
+separator to count words, and a tarot name carries its own `_` that breaks that assumption. BIP39
+contains no punctuation at all, so the assertion tests the generator rather than the list.
+Separate checks split tarot phrases under hyphen, underscore and dot separators and confirm every
+part is a whole card, which pins the joiner swap.
 - **Registry accuracy** — the `size` advertised beside each wordlist matches the list actually
   loaded, so the bits-per-word note can never describe the wrong list.
-- **Entropy arithmetic** — exact bit values for known configurations, tier boundaries, and
-  crack-time formatting at both extremes.
+- **Entropy arithmetic** — exact bit values for known password configurations, tier boundaries,
+  and crack-time formatting at both extremes. The pool sizes the passphrase hint reports — 2,140
+  for the default, 2,218 with every list — are pinned in the merging checks.
 - **Epoch exactness** — a 19-digit nanosecond value round-trips unchanged, and the check also
   asserts that the same value through `Number()` would have been wrong, so the reason for the
   `bigint` stays on record. Fractional and negative epochs are pinned too, because every division
@@ -1659,7 +1670,7 @@ Bundle sizes as built (gzip in brackets):
 | Range / aggregator / splitter / IPv6 page scripts | 1.1 / 3.0 / 3.4 / 2.7 KB | their pages |
 | Username page script, hero list included | 6.1 KB (2.9 KB) | username page |
 | Superhero wordlist | 0.8 KB (0.5 KB) | passphrase page, on demand |
-| EFF short wordlist | 7.1 KB (3.3 KB) | passphrase page, on demand |
+| Tarot wordlist | 1.1 KB (0.4 KB) | passphrase page, on demand |
 | BIP39 wordlist | 12.8 KB (6.2 KB) | passphrase page, on demand |
 | js-yaml | 58.2 KB (17.4 KB) | YAML page, on demand |
 
@@ -1712,10 +1723,11 @@ Honest list, in rough order of how much they matter:
    tools and the byte converter are written in both languages with a switch (§5, *Bilingual
    pages*). Every other page is English, so a Vietnamese reader who follows a link from one of
    those lands in English. The crontab page only describes schedules in Vietnamese.
-9. **A hyphenated word in the EFF short list.** `yo-yo` collides with the hyphen separator, so
-   such a phrase cannot be split back into its words unambiguously. Entropy is unaffected and the
-   word is EFF's own, so nothing is filtered; it is recorded here because it surfaced as a flaky
-   test before it was understood.
+9. **Tarot cards next to a random-symbol separator.** The card joiner steers clear of a fixed
+   `_` or `-` separator, but the random-symbol alphabet holds both, so a phrase like
+   `the_fool_ace_of_cups` can occur and cannot be split back into cards unambiguously. Entropy
+   is barely touched, and the fix would be a per-gap redraw that skews the separator
+   distribution; it is recorded rather than worked around.
 10. **Two address models live side by side.** `ipv4.ts` works on 32-bit numbers and powers the
     subnet calculator; `iprange.ts` works on `bigint` for both families and powers the newer
     tools. They agree — `iprange` parses IPv4 through `ipv4.ts` — but the subnet calculator could

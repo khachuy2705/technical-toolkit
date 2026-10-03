@@ -118,8 +118,8 @@ export const TOOLS: readonly Tool[] = [
     name: 'Passphrase Generator',
     tagline: 'Diceware phrases you can actually remember.',
     description:
-      'Generate memorable diceware passphrases from the EFF wordlists. Pick word count, separators and capitalisation, with entropy shown for every combination.',
-    keywords: ['passphrase generator', 'diceware', 'eff wordlist', 'memorable password'],
+      'Generate memorable passphrases from BIP39 words, superhero names and tarot cards. Pick word count, separators and capitalisation, and mix the lists as you like.',
+    keywords: ['passphrase generator', 'diceware', 'bip39 wordlist', 'tarot', 'memorable password'],
     icon: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 8h.01"/><path d="M8 8h.01"/><path d="M8 16h.01"/><path d="M16 16h.01"/><path d="M12 12h.01"/>',
     status: 'live',
     group: 'security',

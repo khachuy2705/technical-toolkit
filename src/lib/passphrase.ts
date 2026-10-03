@@ -12,7 +12,7 @@ export interface Wordlist {
   readonly load: () => Promise<readonly string[]>;
 }
 
-export type WordlistId = 'bip39-en' | 'superhero' | 'eff-short';
+export type WordlistId = 'bip39-en' | 'superhero' | 'tarot';
 
 /**
  * Wordlists load on demand: the large list is ~60 KB of source, and the
@@ -34,11 +34,11 @@ export const WORDLISTS: readonly Wordlist[] = [
     load: async () => (await import('./wordlists/superhero')).SUPERHERO,
   },
   {
-    id: 'eff-short',
-    label: 'EFF Short',
-    size: 1296,
-    note: 'shorter EFF list, easier to type',
-    load: async () => (await import('./wordlists/eff-short')).EFF_SHORT,
+    id: 'tarot',
+    label: 'Tarot cards',
+    size: 78,
+    note: 'every card in the deck, from the_fool to king_of_pentacles',
+    load: async () => (await import('./wordlists/tarot')).TAROT,
   },
 ] as const;
 
@@ -51,11 +51,11 @@ export function wordlistById(id: WordlistId): Wordlist {
 /**
  * The combined draw pool for a set of lists, with duplicates removed.
  *
- * Deduplication is not tidiness, it is correctness. The lists overlap heavily —
- * 464 words are in both BIP39 and the EFF short list — and a plain concatenation
- * would do two wrong things at once: report `log2(total)` bits for a pool that
- * does not have that many distinct words, and make every shared word twice as
- * likely to be drawn as an unshared one.
+ * Deduplication is not tidiness, it is correctness. Lists can share words — 9
+ * superhero names are also BIP39 words — and a plain concatenation would do two
+ * wrong things at once: report `log2(total)` bits for a pool that does not have
+ * that many distinct words, and make every shared word twice as likely to be
+ * drawn as an unshared one.
  *
  * Insertion order is preserved so the pool is stable across calls, which keeps
  * anything derived from an index reproducible.
@@ -160,6 +160,19 @@ function drawSeparator(opts: PassphraseOptions): string {
   return opts.separator === 'digit' ? String(randomInt(10)) : pick([...SEPARATOR_SYMBOLS]);
 }
 
+/**
+ * How the words inside one entry are joined. Tarot names are stored as
+ * `the_fool`; when the phrase is itself separated by underscores they switch to
+ * `-`, so each card still reads as one unit: `the-fool_ace-of-cups`, not
+ * `the_fool_ace_of_cups`. Derived from the settings, so it adds no entropy.
+ */
+export function innerJoiner(opts: PassphraseOptions): string {
+  const spec = separatorById(opts.separator);
+  const separator =
+    spec.kind === 'custom' ? opts.customSeparator.slice(0, CUSTOM_SEPARATOR_MAX) : (spec.value ?? '');
+  return separator.includes('_') ? '-' : '_';
+}
+
 function capitalize(word: string): string {
   return word.charAt(0).toUpperCase() + word.slice(1);
 }
@@ -194,7 +207,9 @@ export function generatePassphrase(words: readonly string[], opts: PassphraseOpt
   const problem = validatePassphraseOptions(opts);
   if (problem) throw new Error(problem);
 
-  let parts = applyCapitalization(sample(words, opts.wordCount), opts.capitalization);
+  const joiner = innerJoiner(opts);
+  const drawn = sample(words, opts.wordCount).map((w) => w.replaceAll('_', joiner));
+  let parts = applyCapitalization(drawn, opts.capitalization);
 
   // A digit and a symbol are appended to two *different* words when both are
   // requested, so neither overwrites the other's position.

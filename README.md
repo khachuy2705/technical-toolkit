@@ -136,7 +136,7 @@ src/
 │   ├── ui.ts            DOM helpers used by the tool page scripts
 │   ├── textio.ts        Wiring for the two-pane text tools
 │   ├── lang.ts          The language switch on bilingual pages
-│   └── wordlists/       BIP39, superhero and EFF short (dynamic import);
+│   └── wordlists/       BIP39, superhero and tarot (dynamic import);
 │                        Marvel and DC heroes for the username page
 ├── layouts/             BaseLayout (head/SEO/theme) and ToolLayout
 ├── components/          Header, Footer, ToolCard, OutputPanel, BulkPanel, Say, LangSwitch…
@@ -197,9 +197,9 @@ styles and a handful of inline `style` attributes.
 
 ## Credits
 
-Wordlists: the [EFF short diceware list](https://www.eff.org/dice) (1,296 words) and the
-[BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
-(2,048 words), both public domain. The 101-word superhero list is the project's own, kept as
-`src/lib/wordlists/superhero.txt`. So is the username generator's list of 278 Marvel and DC hero
+Wordlists: the [BIP39 English list](https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt)
+(2,048 words), public domain. The 101-word superhero list is the project's own, kept as
+`src/lib/wordlists/superhero.txt`, and so is the 78-card tarot list,
+`src/lib/wordlists/tarot.ts`. So is the username generator's list of 278 Marvel and DC hero
 names, `src/lib/wordlists/heroes.ts`; the names themselves belong to their publishers. Icon
 geometry follows [Lucide](https://lucide.dev) (ISC).

@@ -14,6 +14,7 @@ import {
 } from "../src/lib/password";
 import {
   generatePassphrase,
+  innerJoiner,
   mergeWordlists,
   separatorById,
   CUSTOM_SEPARATOR_MAX,
@@ -23,15 +24,10 @@ import {
   WORDLISTS,
   type PassphraseOptions,
 } from "../src/lib/passphrase";
-import { EFF_SHORT } from "../src/lib/wordlists/eff-short";
+import { TAROT } from "../src/lib/wordlists/tarot";
 import { SUPERHERO } from "../src/lib/wordlists/superhero";
 import { BIP39_EN } from "../src/lib/wordlists/bip39-en";
-import {
-  passwordEntropy,
-  passphraseEntropy,
-  classifyStrength,
-  crackTime,
-} from "../src/lib/entropy";
+import { passwordEntropy, classifyStrength, crackTime } from "../src/lib/entropy";
 
 let failures = 0;
 function check(name: string, condition: boolean, detail = ""): void {
@@ -153,8 +149,8 @@ console.log("\n-- password --");
 
 console.log("\n-- wordlists --");
 {
-  const lists = [...EFF_SHORT, ...SUPERHERO, ...BIP39_EN];
-  check("EFF short has 1296 unique words", EFF_SHORT.length === 1296 && new Set(EFF_SHORT).size === 1296);
+  const lists = [...TAROT, ...SUPERHERO, ...BIP39_EN];
+  check("tarot has 78 unique cards", TAROT.length === 78 && new Set(TAROT).size === 78, String(TAROT.length));
   check("superhero has 101 unique words", SUPERHERO.length === 101 && new Set(SUPERHERO).size === 101, String(SUPERHERO.length));
   check("BIP39 has 2048 unique words", BIP39_EN.length === 2048 && new Set(BIP39_EN).size === 2048, String(BIP39_EN.length));
   check(
@@ -165,11 +161,13 @@ console.log("\n-- wordlists --");
   check("no whitespace inside words", lists.every((w) => !/\s/.test(w)));
   check("superhero words are plain lowercase", SUPERHERO.every((w) => /^[a-z]+$/.test(w)));
   check("BIP39 words are plain lowercase", BIP39_EN.every((w) => /^[a-z]+$/.test(w)));
+  check("tarot names are lowercase words joined by _", TAROT.every((w) => /^[a-z]+(_[a-z]+)*$/.test(w)));
+  check("tarot holds 22 major arcana", TAROT.filter((w) => !w.includes("_of_") || w === "wheel_of_fortune").length === 22);
 
   // The registry advertises a size next to every list; a mismatch would print a
   // bits-per-word figure that does not describe what is actually drawn.
   const sizes = [
-    ["eff-short", EFF_SHORT.length],
+    ["tarot", TAROT.length],
     ["superhero", SUPERHERO.length],
     ["bip39-en", BIP39_EN.length],
   ] as const;
@@ -215,7 +213,7 @@ console.log("\n-- passphrase --");
   check("separator none produces one run of letters", /^[a-z]+$/.test(none), none);
 
   const both = Array.from({ length: 200 }, () =>
-    generatePassphrase(EFF_SHORT, { ...base, includeNumber: true, includeSymbol: true, wordCount: 5 }),
+    generatePassphrase(BIP39_EN, { ...base, includeNumber: true, includeSymbol: true, wordCount: 5 }),
   );
   const suffixSymbol = new RegExp(`[${SUFFIX_SYMBOLS.replace(/[$^]/g, "\$&")}]`);
   check("digit and symbol both appear when requested", both.every((p) => /\d/.test(p) && suffixSymbol.test(p)), both.find((p) => !suffixSymbol.test(p)) ?? both[0]);
@@ -261,19 +259,36 @@ console.log("\n-- passphrase --");
   });
   check("empty custom separator still generates", /^[a-z]+$/.test(emptyCustom), emptyCustom);
 
-  // Documented quirk, not a bug: the EFF lists ship hyphenated entries, so a
-  // hyphen-separated phrase drawn from them cannot be split back into words.
-  // Entropy is unaffected; this check exists so the surprise stays on record —
-  // and it is why the assertions above draw from BIP39, which has no punctuation.
-  const hyphenated = EFF_SHORT.filter((w) => w.includes("-"));
-  check(
-    "EFF short still holds exactly 1 hyphenated word",
-    hyphenated.length === 1,
-    JSON.stringify(hyphenated),
-  );
+  // The assertions above draw from BIP39 because they split a phrase on its
+  // separator to count words, which a tarot name's own `_` would throw off.
   check(
     "BIP39 and superhero carry no punctuation",
     [...BIP39_EN, ...SUPERHERO].every((w) => /^[a-z]+$/.test(w)),
+  );
+
+  // A card keeps its words together with whichever of `_` and `-` the phrase
+  // is not separated by, so it still splits back into whole cards.
+  const cards = new Set(TAROT);
+  const dashed = generatePassphrase(TAROT, { ...base, separator: "dash", wordCount: 8 });
+  check("tarot cards join with _ under a hyphen separator", dashed.split("-").every((w) => cards.has(w)), dashed);
+  const underscored = generatePassphrase(TAROT, { ...base, separator: "underscore", wordCount: 8 });
+  check(
+    "tarot cards join with - under an underscore separator",
+    underscored.split("_").every((w) => cards.has(w.replaceAll("-", "_"))),
+    underscored,
+  );
+  const dotted = generatePassphrase(TAROT, { ...base, separator: "dot", wordCount: 8 });
+  check("tarot cards keep _ under any other separator", dotted.split(".").every((w) => cards.has(w)), dotted);
+  check(
+    "a custom separator containing _ switches cards to -",
+    innerJoiner({ ...base, separator: "custom", customSeparator: "__" }) === "-" &&
+      innerJoiner({ ...base, separator: "custom", customSeparator: "::" }) === "_",
+  );
+  const titledCards = generatePassphrase(TAROT, { ...base, capitalization: "title", wordCount: 8 });
+  check(
+    "title case capitalises a card once",
+    titledCards.split("-").every((w) => cards.has(w.toLowerCase()) && /^[A-Z][^A-Z]*$/.test(w)),
+    titledCards,
   );
 
   const superheroPhrase = generatePassphrase(SUPERHERO, { ...base, wordCount: 5 });
@@ -309,37 +324,16 @@ console.log("\n-- merging wordlists --");
   const phrase = generatePassphrase(merged, { ...DEFAULT_PASSPHRASE_OPTIONS, includeNumber: false });
   check("a merged pool generates", phrase.split("-").every((w) => merged.includes(w)), phrase);
 
-  // The overlap is the whole reason merge exists: naive concatenation would
-  // claim log2(sum) bits and make shared words twice as likely to be drawn.
-  const all = mergeWordlists([BIP39_EN, SUPERHERO, EFF_SHORT]);
-  const naive = BIP39_EN.length + SUPERHERO.length + EFF_SHORT.length;
-  console.log(
-    `     all three lists: ${all.length} distinct of ${naive} raw — naive concat would overstate by ${(Math.log2(naive) - Math.log2(all.length)).toFixed(2)} bits/word`,
-  );
+  // Pools we actually ship, so a list being added or dropped shows up here.
+  check("default pool is 2140 words", merged.length === 2140, String(merged.length));
+  const all = mergeWordlists([BIP39_EN, SUPERHERO, TAROT]);
+  check("every list ticked is 2218 words", all.length === 2218, String(all.length));
+  check("tarot shares no word with the other lists", all.length === merged.length + TAROT.length);
 }
 
 console.log("\n-- entropy --");
 {
   check("20 chars from a 90-char pool = 129.8 bits", Math.abs(passwordEntropy(90, 20) - 129.83) < 0.01, passwordEntropy(90, 20).toFixed(2));
-  const plain: PassphraseOptions = { ...DEFAULT_PASSPHRASE_OPTIONS, includeNumber: false };
-  // Pools we actually ship, so a list being added or dropped shows up here.
-  const DEFAULT_POOL = mergeWordlists([BIP39_EN, SUPERHERO]).length;
-  const EVERY_POOL = mergeWordlists([BIP39_EN, SUPERHERO, EFF_SHORT]).length;
-  check("default pool is 2140 words", DEFAULT_POOL === 2140, String(DEFAULT_POOL));
-  check("every list ticked is 2967 words", EVERY_POOL === 2967, String(EVERY_POOL));
-  check("6 words from the default pool = 66.4 bits", Math.abs(passphraseEntropy(plain, DEFAULT_POOL) - 66.38) < 0.01, passphraseEntropy(plain, DEFAULT_POOL).toFixed(2));
-  check("6 words from all three = 69.2 bits", Math.abs(passphraseEntropy(plain, EVERY_POOL) - 69.21) < 0.01, passphraseEntropy(plain, EVERY_POOL).toFixed(2));
-  check("6 EFF-short words = 62.0 bits", Math.abs(passphraseEntropy(plain, 1296) - 62.04) < 0.01);
-  check("6 superhero words = 39.9 bits", Math.abs(passphraseEntropy(plain, 101) - 39.95) < 0.01, passphraseEntropy(plain, 101).toFixed(2));
-  check("6 BIP39 words = 66.0 bits", Math.abs(passphraseEntropy(plain, 2048) - 66) < 0.01, passphraseEntropy(plain, 2048).toFixed(2));
-
-  // A typed separator is part of the scheme, not a secret.
-  const typed = passphraseEntropy({ ...plain, separator: "custom", customSeparator: "::" }, DEFAULT_POOL);
-  check("custom separator adds no bits", Math.abs(typed - passphraseEntropy(plain, DEFAULT_POOL)) < 1e-9, typed.toFixed(2));
-
-  const withDigitSep = passphraseEntropy({ ...plain, separator: "digit" }, DEFAULT_POOL);
-  check("random digit separators add ~16.6 bits", Math.abs(withDigitSep - passphraseEntropy(plain, DEFAULT_POOL) - 16.61) < 0.05, withDigitSep.toFixed(2));
-
   check("empty pool scores 0", passwordEntropy(1, 20) === 0 && passwordEntropy(90, 0) === 0);
 
   const levels = [20, 40, 60, 80, 130].map((b) => classifyStrength(b));
@@ -370,14 +364,7 @@ console.log("\n-- shipped defaults --");
     d.wordlistIds.join(","),
   );
   check("passphrase appends a digit by default", d.includeNumber === true);
-
-  // Printed, not asserted: the default trades strength for memorability, and
-  // this line is where that trade stays visible on every run.
-  const pool = mergeWordlists([BIP39_EN, SUPERHERO]);
-  const bits = passphraseEntropy(d, pool.length);
-  console.log(
-    `     default: ${generatePassphrase(pool, d)}  →  ${bits.toFixed(1)} bits, ${classifyStrength(bits).label}, cracked in ${crackTime(bits)}`,
-  );
+  console.log(`     default: ${generatePassphrase(mergeWordlists([BIP39_EN, SUPERHERO]), d)}`);
 }
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED\n" : `\n${failures} CHECK(S) FAILED\n`);

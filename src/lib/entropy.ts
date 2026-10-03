@@ -8,42 +8,9 @@
  * understate a genuinely random output.
  */
 
-import {
-  SEPARATOR_SYMBOLS,
-  SUFFIX_SYMBOLS,
-  separatorById,
-  type PassphraseOptions,
-} from './passphrase';
-
 export function passwordEntropy(poolSize: number, length: number): number {
   if (poolSize < 2 || length < 1) return 0;
   return Math.log2(poolSize) * length;
-}
-
-/**
- * Bits for a passphrase configuration.
- *
- * Deliberately conservative: the random *position* of an appended digit or
- * symbol is real entropy, but we do not count it. Under-promising is the right
- * failure mode for a security tool.
- */
-export function passphraseEntropy(opts: PassphraseOptions, listSize: number): number {
-  if (listSize < 2 || opts.wordCount < 1) return 0;
-
-  let bits = Math.log2(listSize) * opts.wordCount;
-
-  // Only a freshly drawn separator adds anything. A fixed one — including a
-  // custom string the user typed — is part of the scheme the attacker knows.
-  const gaps = Math.max(0, opts.wordCount - 1);
-  if (separatorById(opts.separator).kind === 'random') {
-    bits += gaps * Math.log2(opts.separator === 'digit' ? 10 : SEPARATOR_SYMBOLS.length);
-  }
-
-  if (opts.capitalization === 'random-word') bits += Math.log2(opts.wordCount);
-  if (opts.includeNumber) bits += Math.log2(10);
-  if (opts.includeSymbol) bits += Math.log2(SUFFIX_SYMBOLS.length);
-
-  return bits;
 }
 
 export type StrengthLevel = 0 | 1 | 2 | 3 | 4;
