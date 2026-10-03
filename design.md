@@ -1218,6 +1218,11 @@ Bilingual (§5). The question it exists for is in its description: 5 TB over 1 G
 - **Reference tables**, computed at build time by the same code: disk sizes against what Windows
   shows (why a 1 TB drive is 931 GB), and common link speeds with the time to move 1 GB and 1 TB.
 
+Four links under the title jump to the four tools — `#ask`, `#sizes`, `#speeds`, `#time` — the
+same plain anchors as the crontab page (§6.20), in both languages. `.jump--grid` lays them out as
+one even row on a wide screen and two by two below 660px, so on a phone they take two rows
+instead of four full-width ones.
+
 | Control | Options | Default |
 |---|---|---|
 | Of the link's speed, data gets | line rate · TCP over Ethernet, MTU 1500 (1448 of 1538 bytes, 94.1%) · 90% · 80% | line rate |

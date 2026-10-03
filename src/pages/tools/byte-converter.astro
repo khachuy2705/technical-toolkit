@@ -6,10 +6,20 @@
  */
 import ToolLayout from "../../layouts/ToolLayout.astro";
 import Say from "../../components/Say.astro";
+import Icon from "../../components/Icon.astro";
+import { ICONS } from "../../data/icons";
 import { bothAttr } from "../../data/i18n";
 import { EFFICIENCIES, RATE_UNITS, SIZE_UNITS, compare, formatDuration, formatNumber, inUnit, rateUnit, ratio, sizeUnit, transferTime } from "../../lib/bytes";
 
 const QUICK = ["5 TB @ 1 Gbps", "100 GiB @ 500 Mbps", "4,7 GB qua 300 Mbps", "1 TB in 2 h", "300 Mbps for 1 day", "1 TB to GiB", "1 Gbps in MB/s"];
+
+/** The links under the title, one per tool on the page, in page order. */
+const JUMPS = [
+  { href: "#ask", name: { en: "Ask in one line", vi: "Hỏi trong một dòng" }, hint: { en: "A question in plain words", vi: "Câu hỏi bằng lời thường" } },
+  { href: "#sizes", name: { en: "Sizes", vi: "Dung lượng" }, hint: { en: "One size in every unit", vi: "Một dung lượng, mọi đơn vị" } },
+  { href: "#speeds", name: { en: "Speeds", vi: "Tốc độ" }, hint: { en: "Every bit and byte rate", vi: "Mọi đơn vị bit và byte" } },
+  { href: "#time", name: { en: "How long will it take?", vi: "Mất bao lâu?" }, hint: { en: "Size and speed from menus", vi: "Dung lượng và tốc độ từ menu" } },
+] as const;
 
 const SIZE_GROUPS = [
   { label: { en: "Bytes, powers of 1000", vi: "Byte, luỹ thừa của 1000" }, family: "decimal" },
@@ -56,7 +66,21 @@ const LINKS = [
 ---
 
 <ToolLayout slug="byte-converter">
-  <section class="card">
+  <nav class="jump jump--grid" slot="head" {...bothAttr("aria-label", "On this page", "Trên trang này")}>
+    {
+      JUMPS.map((jump) => (
+        <a class="jump__link" href={jump.href}>
+          <Icon paths={ICONS.arrowDown} size={18} strokeWidth={2} />
+          <span class="jump__text">
+            <Say class="jump__name" en={jump.name.en} vi={jump.name.vi} />
+            <Say class="jump__hint" en={jump.hint.en} vi={jump.hint.vi} />
+          </span>
+        </a>
+      ))
+    }
+  </nav>
+
+  <section class="card jump-target" id="ask">
     <div class="io__head">
       <label class="io__label" for="quick"><Say en="Ask in one line" vi="Hỏi trong một dòng" /></label>
     </div>
@@ -91,7 +115,7 @@ const LINKS = [
     <div class="bytes-answer" id="quick-out" aria-live="polite"></div>
   </section>
 
-  <section class="card">
+  <section class="card jump-target" id="sizes">
     <h2 class="card__title"><Say en="Sizes" vi="Dung lượng" /></h2>
     <div class="bytes-pair">
       <label class="visually-hidden" for="size-number"><Say en="Amount" vi="Giá trị" /></label>
@@ -113,7 +137,7 @@ const LINKS = [
     <div class="bytes-tables" id="size-out"></div>
   </section>
 
-  <section class="card">
+  <section class="card jump-target" id="speeds">
     <h2 class="card__title"><Say en="Speeds" vi="Tốc độ" /></h2>
     <div class="bytes-pair">
       <label class="visually-hidden" for="rate-number"><Say en="Amount" vi="Giá trị" /></label>
@@ -135,7 +159,7 @@ const LINKS = [
     <div class="bytes-tables" id="rate-out"></div>
   </section>
 
-  <section class="card">
+  <section class="card jump-target" id="time">
     <h2 class="card__title"><Say en="How long will it take?" vi="Mất bao lâu?" /></h2>
     <div class="controls">
       <div class="field">
